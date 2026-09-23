@@ -1,0 +1,22 @@
+services:
+  db:
+    image: postgres:16
+    container_name: cloud_tel141_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cloud_admin
+      POSTGRES_PASSWORD: cloud_g3
+      POSTGRES_DB: cloud_g3
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cloud_admin -d cloud_g3"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

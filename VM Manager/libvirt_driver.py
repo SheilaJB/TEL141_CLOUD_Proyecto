@@ -25,7 +25,7 @@ class KVMRemoteDriver:
             f"mkdir -p $(dirname {base_path}) $(dirname {overlay_path})"
         )
 
-        check_cmd = f"test -f {base_path}"
+        check_cmd = f"test -s {base_path}"
         try:
             self._exec_remote_ssh(check_cmd)
         except Exception:

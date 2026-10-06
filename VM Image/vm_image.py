@@ -5,7 +5,7 @@ import shutil
 
 app = FastAPI(title="VM Image Service")
 
-STORAGE_DIR = "./storage"
+STORAGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Storage")
 os.makedirs(STORAGE_DIR, exist_ok=True)
 
 # Catálogo de imágenes físicamente almacenadas en ./storage

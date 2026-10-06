@@ -2,36 +2,34 @@ import libvirt
 import subprocess
 import time
 
+
 class KVMRemoteDriver:
-    def __init__(self, worker_ip: str, user: str = "root"):
+    def __init__(self, worker_ip: str, user: str = "ubuntu"):
         self.worker_ip = worker_ip
         self.user = user
         self.uri = f"qemu+ssh://{user}@{worker_ip}/system"
 
     def _exec_remote_ssh(self, command: str) -> str:
-        #Ejecuta un comando bash remoto por SSH en el Worker
-        ssh_cmd = f"ssh -o StrictHostKeyChecking=no {self.user}@{self.worker_ip} '{command}'"
+        # Ejecuta un comando bash remoto por SSH en el Worker, con sudo   
+        ssh_cmd = (
+            f"ssh -o StrictHostKeyChecking=no {self.user}@{self.worker_ip} "
+            f"'sudo {command}'"
+        )
         res = subprocess.run(ssh_cmd, shell=True, capture_output=True, text=True)
-        # error
         if res.returncode != 0:
             raise Exception(f"SSH Error en {self.worker_ip}: {res.stderr}")
         return res.stdout.strip()
 
     def prepare_qcow2_overlay(self, image_download_url: str, base_path: str, overlay_path: str):
-        
-        # Crea directorios si no existen
         self._exec_remote_ssh(f"mkdir -p $(dirname {base_path}) $(dirname {overlay_path})")
-        
-        # Descargar imagen base desde el Server 4
-        dl_cmd = f"if [ ! -f {base_path} ]; then wget -qO {base_path} {image_download_url}; fi"
+
+        dl_cmd = f"bash -c 'if [ ! -f {base_path} ]; then wget -qO {base_path} {image_download_url}; fi'"
         self._exec_remote_ssh(dl_cmd)
-        
-        # Overlay con respaldo en la imagen base
+
         qemu_cmd = f"qemu-img create -f qcow2 -b {base_path} -F qcow2 {overlay_path}"
         self._exec_remote_ssh(qemu_cmd)
 
     def define_and_start_vm(self, vm_name: str, memory_mb: int, vcpus: int, disk_path: str) -> dict:
-        # Conecta al KVM del Worker remoto, define el dominio XML, lo arranca y obtiene su PID
         conn = libvirt.open(self.uri)
         if not conn:
             raise Exception(f"No se pudo conectar a KVM en {self.worker_ip}")
@@ -58,8 +56,7 @@ class KVMRemoteDriver:
         try:
             dom = conn.createXML(xml_config, 0)
             time.sleep(1)
-            
-            # Proceso ID del proceso QEMU en el Worker
+
             pid_str = self._exec_remote_ssh(f"pgrep -f 'name {vm_name}' | head -n 1")
             pid = int(pid_str) if pid_str else -1
 
@@ -70,7 +67,6 @@ class KVMRemoteDriver:
             raise e
 
     def destroy_and_smart_clean(self, vm_name: str, overlay_path: str):
-        # Detiene la VM y realiza borrado del disco .qcow2 del Worker
         try:
             conn = libvirt.open(self.uri)
             if conn:
@@ -82,6 +78,6 @@ class KVMRemoteDriver:
                 conn.close()
         except Exception:
             pass
-            
+
         rm_cmd = f"rm -f {overlay_path}"
         self._exec_remote_ssh(rm_cmd)

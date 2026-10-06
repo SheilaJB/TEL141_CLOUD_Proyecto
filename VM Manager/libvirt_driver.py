@@ -21,12 +21,21 @@ class KVMRemoteDriver:
         return res.stdout.strip()
 
     def prepare_qcow2_overlay(self, image_download_url: str, base_path: str, overlay_path: str):
-        self._exec_remote_ssh(f"mkdir -p $(dirname {base_path}) $(dirname {overlay_path})")
+        self._exec_remote_ssh(
+            f"mkdir -p $(dirname {base_path}) $(dirname {overlay_path})"
+        )
 
-        dl_cmd = f"bash -c 'if [ ! -f {base_path} ]; then wget -qO {base_path} {image_download_url}; fi'"
-        self._exec_remote_ssh(dl_cmd)
+        check_cmd = f"test -f {base_path}"
+        try:
+            self._exec_remote_ssh(check_cmd)
+        except Exception:
+            download_cmd = f"wget -qO {base_path} {image_download_url}"
+            self._exec_remote_ssh(download_cmd)
 
-        qemu_cmd = f"qemu-img create -f qcow2 -b {base_path} -F qcow2 {overlay_path}"
+        qemu_cmd = (
+            f"qemu-img create -f qcow2 "
+            f"-b {base_path} -F qcow2 {overlay_path}"
+        )
         self._exec_remote_ssh(qemu_cmd)
 
     def define_and_start_vm(self, vm_name: str, memory_mb: int, vcpus: int, disk_path: str) -> dict:

@@ -123,7 +123,7 @@ async def me(
 )
 async def create_user(
     body: UserCreateRequest,
-    actor: Annotated[UserInfo, Depends(require_roles({"operador", "admin"}))],
+    actor: Annotated[UserInfo, Depends(require_roles({"admin"}))],
     service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> UserInfo:
     return await service.create_user(actor, body)
@@ -133,7 +133,7 @@ async def create_user(
 async def update_user(
     user_id: int,
     body: UserUpdateRequest,
-    actor: Annotated[UserInfo, Depends(require_roles({"operador", "admin"}))],
+    actor: Annotated[UserInfo, Depends(require_roles({"admin"}))],
     service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> UserInfo:
     return await service.update_user(actor, user_id, body)

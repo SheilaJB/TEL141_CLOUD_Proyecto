@@ -2,7 +2,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
-from app.auth.dependencies import get_auth_service, get_claims, get_current_user
+from app.auth.dependencies import (
+    get_auth_service,
+    get_claims,
+    get_current_user,
+    require_roles,
+)
 from app.auth.schemas import (
     LoginRequest,
     LoginResponse,
@@ -118,7 +123,7 @@ async def me(
 )
 async def create_user(
     body: UserCreateRequest,
-    actor: Annotated[UserInfo, Depends(get_current_user)],
+    actor: Annotated[UserInfo, Depends(require_roles({"operador", "admin"}))],
     service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> UserInfo:
     return await service.create_user(actor, body)
@@ -128,7 +133,7 @@ async def create_user(
 async def update_user(
     user_id: int,
     body: UserUpdateRequest,
-    actor: Annotated[UserInfo, Depends(get_current_user)],
+    actor: Annotated[UserInfo, Depends(require_roles({"operador", "admin"}))],
     service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> UserInfo:
     return await service.update_user(actor, user_id, body)

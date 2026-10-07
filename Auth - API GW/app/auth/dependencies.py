@@ -1,9 +1,10 @@
+from collections.abc import Awaitable, Callable, Collection
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 
 from app.auth.service import AuthService
-from app.shared.claims import Claims
+from app.shared.claims import Claims, Role
 from app.shared.schemas import UserInfo
 
 
@@ -31,3 +32,25 @@ def get_current_user(claims: Annotated[Claims, Depends(get_claims)]) -> UserInfo
         rol=claims.rol,
         nivel=claims.nivel,
     )
+
+
+def require_roles(
+    allowed_roles: Collection[Role],
+) -> Callable[..., Awaitable[UserInfo]]:
+    roles = frozenset(allowed_roles)
+
+    async def role_checker(
+        current_user: Annotated[UserInfo, Depends(get_current_user)],
+    ) -> UserInfo:
+        if current_user.rol not in roles:
+            required_roles = ", ".join(sorted(roles))
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    f"Access denied for role '{current_user.rol}'. "
+                    f"Required role(s): {required_roles}"
+                ),
+            )
+        return current_user
+
+    return role_checker

@@ -1,6 +1,6 @@
 -- =========================================================
 -- init.sql — Orquestador de slices TEL141
--- Esquema Postgres: schemas "auth" y "slices"
+-- DB cloud_g3: schemas "auth" y "slices"
 -- =========================================================
 
 CREATE SCHEMA IF NOT EXISTS auth;
@@ -48,11 +48,22 @@ CREATE TABLE auth.usuario (
 );
 
 INSERT INTO auth.usuario (codigo, hash_password, rol_id, nivel_id, creado_por) VALUES
-    ('20260001', 'hashed_password_here', 1, 1, NULL),  -- primer usuario consumidor basico
-    ('20260002', 'hashed_password_here', 1, 2, NULL),  -- segundo usuario consumidor avanzado
-    ('operator', 'hashed_password_here', 2, NULL, NULL),  -- primer usuario operador
-    ('admin', 'hashed_password_here', 3, NULL, NULL);     -- primer usuario admin
+    ('20260001', '$argon2id$v=19$m=16,t=2,p=1$R3pXUEhxWGR1WnhNQkUzTw$iwIAr8qyKxalgV/SWVkYug', 1, 1, NULL),  -- usuario consumidor basico 20260001-consumidor
+    ('20260002', '$argon2id$v=19$m=16,t=2,p=1$MDZ2aHZsM0JHb3ZsaG5KRg$4jxDWd4T0xs1kTZxt3ttWg', 1, 2, NULL),  -- usuario consumidor avanzado 20260002-consumidor
+    ('operador', '$argon2id$v=19$m=16,t=2,p=1$OThZM2RRaU00NEZxbFM4bw$zg1BBvSyLTDCxVxnpAI1Yg', 2, NULL, NULL),  -- usuario operador-operador
+    ('admin', '$argon2id$v=19$m=16,t=2,p=1$OThZM2RRaU00NEZxbFM4bw$JROgUqUKhYFy7sPqed/VWg', 3, NULL, NULL);     -- usuario admin-admin
 
+CREATE TABLE auth.refresh_token (
+    id              UUID PRIMARY KEY,
+    usuario_id      INTEGER NOT NULL REFERENCES auth.usuario(id) ON DELETE CASCADE,
+    familia_id      UUID NOT NULL,                 -- cadena de rotación
+    token_hash      TEXT NOT NULL UNIQUE,          -- sha256 del token; nunca el token
+    creado_en       TIMESTAMP NOT NULL DEFAULT now(),
+    expira_en       TIMESTAMP NOT NULL,
+    revocado_en     TIMESTAMP,
+    reemplazado_por UUID REFERENCES auth.refresh_token(id)
+);
+CREATE INDEX idx_refresh_usuario ON auth.refresh_token(usuario_id);
 
 CREATE TABLE auth.cuota (
     id              SERIAL PRIMARY KEY,
@@ -63,12 +74,12 @@ CREATE TABLE auth.cuota (
 );
 
 INSERT INTO auth.cuota (nivel_id, recurso, prometido) VALUES
-    (1, 'vcpu', 4),
-    (1, 'ram_mb', 8),
-    (1, 'disk_mb', 1024),
+    (1, 'vcpu', 8),
+    (1, 'ram_mb', 4096),
+    (1, 'disk_mb', 14000),
     (2, 'vcpu', 16),
-    (2, 'ram_mb', 32768),
-    (2, 'disk_mb', 102400);
+    (2, 'ram_mb', 8192),
+    (2, 'disk_mb', 28000);
 
 CREATE TABLE auth.cuota_override (
     id              SERIAL PRIMARY KEY,
@@ -112,21 +123,21 @@ CREATE TABLE slices.zona_disponibilidad (
     CONSTRAINT chk_ratio_disk_valido CHECK (disk_allocation_ratio_default <= disk_allocation_ratio_limit)
 );
 
-
-
 INSERT INTO slices.zona_disponibilidad (nombre, cluster_id, cpu_allocation_ratio_default, cpu_allocation_ratio_limit, ram_allocation_ratio_default, ram_allocation_ratio_limit, disk_allocation_ratio_default, disk_allocation_ratio_limit) VALUES
     ('linx-1', 1, 7.0, 8.0, 1.5, 2.0, 1.0, 1.5),     -- Linux: nivel basico y avanzado, densidad alta 
     ('linx-2', 1, 4.0, 5.5, 2.0, 2.5, 1.0, 1.5),     -- Linux: nivel avanzado, densidad baja
     ('openst-1', 2, 6.0, 7.5, 1.0, 1.5, 1.0, 1.5);     -- OpenStack: nivel avanzado, densidad media
 
-CREATE TABLE auth.nivel_zona_acceso (
-    id          SERIAL PRIMARY KEY,
-    nivel_id    INTEGER NOT NULL REFERENCES auth.nivel(id) ON DELETE CASCADE,
-    zona_id     INTEGER NOT NULL REFERENCES slices.zona_disponibilidad(id) ON DELETE CASCADE,
-    UNIQUE (nivel_id, zona_id)
+CREATE TABLE auth.nivel_accede_zona (
+    nivel_id INTEGER NOT NULL,
+    zona_id INTEGER NOT NULL,
+    PRIMARY KEY (nivel_id, zona_id),
+    
+    FOREIGN KEY (nivel_id) REFERENCES auth.nivel(id) ON DELETE CASCADE,
+    FOREIGN KEY (zona_id) REFERENCES slices.zona_disponibilidad(id) ON DELETE CASCADE
 );
 
-INSERT INTO auth.nivel_zona_acceso (nivel_id, zona_id) VALUES
+INSERT INTO auth.nivel_accede_zona (nivel_id, zona_id) VALUES
     (1, 1),  -- nivel basico accede a linx-1
     (2, 1),  -- nivel avanzado accede a linx-1
     (2, 2),  -- nivel avanzado accede a linx-2
@@ -147,10 +158,9 @@ CREATE TABLE slices.servidor (
 );
 
 INSERT INTO slices.servidor (ip_serv, mac_serv, total_cpu_cores, total_ram_mb, total_disk_mb, zona_id) VALUES
-    ('192.168.1.10', '00:11:22:33:44:55', 8, 16384, 102400, 1),
-    ('192.168.1.11', '00:11:22:33:44:56', 8, 16384, 102400, 1),
-    ('192.168.1.12', '00:11:22:33:44:57', 16, 16384, 102400, 2),
-    ('192.168.1.13', '00:11:22:33:44:58', 8, 16384, 102400, 2),
+    ('10.0.10.1', '00:11:22:33:44:55', 8, 16384, 1000, 1),
+    ('10.0.10.2', '00:11:22:33:44:56', 8, 16384, 1000, 1),
+    ('10.0.10.3', '00:11:22:33:44:57', 16, 16384, 1000, 2),
     ('192.168.1.14', '00:11:22:33:44:59', 16, 16384, 102400, 3),
     ('192.168.1.15', '00:11:22:33:44:60', 8, 16384, 102400, 3);
 
@@ -159,14 +169,13 @@ CREATE TABLE slices.image (
     nombre                  TEXT NOT NULL,
     cluster_compatible      INTEGER REFERENCES slices.cluster(id),  -- puede ser NULL, cluster donde se puede desplegar la imagen
     ruta_referencia         TEXT NOT NULL,   -- ubicación/id real de la imagen
-    contador_referencias    INTEGER NOT NULL DEFAULT 0,
-    img_base_id             INTEGER REFERENCES slices.image(id),  -- NULL si es imagen base, no derivada
+    contador_refs           INTEGER NOT NULL DEFAULT 0,
     estado                  TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (estado IN ('ACTIVE', 'DEPRECATED', 'DELETED'))
 );
 
-INSERT INTO slices.image (nombre, cluster_compatible, ruta_referencia, img_base_id) VALUES
-    ('Ubuntu 20.04 LTS', 1, '/images/ubuntu-20.04.qcow2', NULL),
-    ('CentOS 8', 1, '/images/centos-8.qcow2', NULL);
+INSERT INTO slices.image (nombre, cluster_compatible, ruta_referencia) VALUES
+    ('Cirros', 1, '/images/cirros.qcow2'),
+    ('Linux Alpine', 1, '/images/alpine.qcow2');
 
 CREATE TABLE slices.flavor (
     id                  SERIAL PRIMARY KEY,
@@ -179,9 +188,10 @@ CREATE TABLE slices.flavor (
 );
 
 INSERT INTO slices.flavor (name, descripcion, vcpu, vram_mb, vdisk_mb) VALUES
-    ('small-v1', 'Pequeño: 1 vCPU, 1 GB RAM, 10 GB disco', 1, 1024, 10240),
-    ('medium-v1', 'Mediano: 2 vCPU, 2 GB RAM, 20 GB disco', 2, 2048, 20480),
-    ('large-v1', 'Grande: 4 vCPU, 4 GB RAM, 40 GB disco', 4, 4096, 40960);
+    ('micro-v1', 'Micro: 1 vCPU, 256 MB RAM, 1 GB disco', 1, 256, 1000),
+    ('small-v1', 'Pequeño: 1 vCPU, 512 MB RAM, 1 GB disco', 1, 512, 1000),
+    ('medium-v1', 'Mediano: 2 vCPU, 512 MB RAM, 600 MB disco', 1, 512, 2500),
+    ('large-v1', 'Grande: 4 vCPU, 1 GB RAM, 1 GB disco', 2, 1024, 4000);
 
 
 -- slices — plantillas y slices
@@ -200,15 +210,15 @@ CREATE TABLE slices.slice (
     usuario_id          INTEGER NOT NULL REFERENCES auth.usuario(id),
     nombre              TEXT NOT NULL,
     estado              TEXT NOT NULL DEFAULT 'DRAFT' CHECK (
-                            estado IN ('DRAFT', 'ACTIVE', 'STOPPED', 'FAILED', 'DELETED')
+                            estado IN ('DRAFT', 'UPDATING', 'RUNNING', 'STOPPED', 'FAILED', 'ELIMINATED')
                         ),
-    cluster_id          INTEGER REFERENCES slices.cluster(id),
+    zona_id          INTEGER REFERENCES slices.zona_disponibilidad(id),
     version_activa_id   INTEGER,   -- FK tras crear slice_version, una por slice
     fecha_creacion      TIMESTAMP NOT NULL DEFAULT now(),
     fecha_modificacion  TIMESTAMP NOT NULL DEFAULT now()
 );
 
-INSERT INTO slices.slice (usuario_id, nombre, estado, cluster_id, version_activa_id) VALUES
+INSERT INTO slices.slice (usuario_id, nombre, estado, zona_id, version_activa_id) VALUES
     (1, 'Slice de prueba 1', 'DRAFT', 1, NULL),
     (2, 'Slice de prueba 2', 'DRAFT', 2, NULL);
 
@@ -220,7 +230,7 @@ CREATE TABLE slices.slice_version (
     custom              BOOLEAN NOT NULL DEFAULT FALSE,
     plantilla_origen_id INTEGER REFERENCES slices.plantilla(id),
     estado_version      TEXT NOT NULL DEFAULT 'DRAFT' CHECK (
-                            estado_version IN ('DRAFT', 'APPROVAL_PENDING', 'RESERVED', 'PROVISIONING', 'RUNNING', 'SUSPENDED', 'HISTORIC')
+                            estado_version IN ('DRAFT', 'APPROVAL_PENDING', 'DEPLOYING', 'ACTIVE', 'INCONSISTENT', 'ARCHIVED')
                         ),
     UNIQUE (slice_id, numero_version)
 );
@@ -237,49 +247,89 @@ ALTER TABLE slices.slice
 -- slices — topología (grafo de nodos y enlaces)
 
 CREATE TABLE slices.slice_nodo (
-    id                  SERIAL PRIMARY KEY,
-    slice_version_id    INTEGER NOT NULL REFERENCES slices.slice_version(id) ON DELETE CASCADE,
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    slice_id            INTEGER NOT NULL REFERENCES slices.slice(id) ON DELETE CASCADE,
     "name"              TEXT NOT NULL,
     -- especificacion      JSONB NOT NULL,
-    flavor_id          INTEGER NOT NULL REFERENCES slices.flavor(id),
+    defin_version_id    INTEGER NOT NULL REFERENCES slices.slice_version(id),
+    flavor_id           INTEGER NOT NULL REFERENCES slices.flavor(id),
     imagen_id           INTEGER NOT NULL REFERENCES slices.image(id),
-    estado_nodo     TEXT NOT NULL DEFAULT 'PENDING' CHECK (
-                            estado_nodo IN ('PENDING', 'RESERVED', 'CREATED', 'RUNNING', 'STOPPED', 'FAILED', 'DELETED')
+    estado_nodo         TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+                            estado_nodo IN ('PENDING', 'RUNNING', 'STOPPED', 'FAILED', 'DELETED')
                         )
 );
 
-INSERT INTO slices.slice_nodo (slice_version_id, name, flavor_id, imagen_id, estado_nodo) VALUES
-    (1, 'Nodo 1A', 1, 1, 'PENDING'),
-    (1, 'Nodo 1B', 2, 1, 'PENDING'),
-    (1, 'Nodo 1C', 3, 1, 'PENDING'),
-    (2, 'Nodo 2A', 3, 1, 'PENDING'),
-    (2, 'Nodo 2B', 2, 1, 'PENDING'),
-    (2, 'Nodo 2C', 1, 1, 'PENDING');
+INSERT INTO slices.slice_nodo (slice_id, defin_version_id, name, flavor_id, imagen_id, estado_nodo) VALUES
+    (1, 1, 'Nodo 1A', 1, 1, 'PENDING'),
+    (1, 1, 'Nodo 1B', 2, 1, 'PENDING'),
+    (1, 1, 'Nodo 1C', 3, 1, 'PENDING'),
+    (2, 2, 'Nodo 2A', 3, 1, 'PENDING'),
+    (2, 2, 'Nodo 2B', 2, 1, 'PENDING'),
+    (2, 2, 'Nodo 2C', 1, 1, 'PENDING');
 
+-- CREATE TABLE slices.slice_enlace (
+--     id                  SERIAL PRIMARY KEY,
+--     slice_id            INTEGER NOT NULL REFERENCES slices.slice(id) ON DELETE CASCADE,
+--     name                TEXT NOT NULL,
+--     defin_version_id    INTEGER NOT NULL REFERENCES slices.slice_version(id) ON DELETE CASCADE,
+--     nodo_origen_id      INTEGER NOT NULL REFERENCES slices.slice_nodo(id),
+--     nodo_destino_id     INTEGER NOT NULL REFERENCES slices.slice_nodo(id),
+--     estado              TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+--                             estado IN ('PENDING', 'CREATED', 'FAILED', 'DELETED')
+--                         ),
+--     CHECK (nodo_origen_id != nodo_destino_id)
+-- );
 CREATE TABLE slices.slice_enlace (
-    id                  SERIAL PRIMARY KEY,
-    slice_version_id    INTEGER NOT NULL REFERENCES slices.slice_version(id) ON DELETE CASCADE,
-    "name"              TEXT NOT NULL,
-    nodo_origen_id      INTEGER NOT NULL REFERENCES slices.slice_nodo(id),
-    nodo_destino_id     INTEGER NOT NULL REFERENCES slices.slice_nodo(id),
-    config_red          JSONB NOT NULL DEFAULT '{}',  -- vlan, aislamiento, salida a Internet
-    estado              TEXT NOT NULL DEFAULT 'PENDING' CHECK (
-                            estado IN ('PENDING', 'CREATED', 'FAILED', 'DELETED')
-                        ),
-    CHECK (nodo_origen_id != nodo_destino_id)
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    slice_id            INTEGER NOT NULL REFERENCES slices.slice(id) ON DELETE CASCADE,
+    name                TEXT NOT NULL,
+    defin_version_id    INTEGER NOT NULL REFERENCES slices.slice_version(id)
+);
+CREATE TABLE slices.slice_enlace_puerto (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    enlace_id           UUID NOT NULL REFERENCES slices.slice_enlace(id) ON DELETE CASCADE,
+    nodo_id             UUID NOT NULL REFERENCES slices.slice_nodo(id),
+    name                TEXT,
+    public              BOOLEAN NOT NULL DEFAULT FALSE,
+    -- facts que escribe el adaptador:
+    mac                 MACADDR,
+    ip                  INET,
+    vlan_tag            INTEGER,
+    ns                  TEXT,
+    UNIQUE (enlace_id, nodo_id)
 );
 
-CREATE INDEX idx_slice_nodos_version ON slices.slice_nodo(slice_version_id);
-CREATE INDEX idx_slice_enlaces_version ON slices.slice_enlace(slice_version_id);
+
+CREATE INDEX idx_slice_nodos_version ON slices.slice_nodo(defin_version_id);
+CREATE INDEX idx_slice_enlaces_version ON slices.slice_enlace(defin_version_id);
+
+
+-- slices — despliegue (workflows de cambios de slice)
+CREATE TABLE slices.deployment (             -- una fila por intento. ejem. actualizar versión A a la B
+    id                  SERIAL PRIMARY KEY,
+    slice_id            INTEGER NOT NULL REFERENCES slices.slice(id),
+    origin_version_id   INTEGER REFERENCES slices.slice_version(id),
+    target_version_id   INTEGER REFERENCES slices.slice_version(id),
+    tipo                TEXT NOT NULL CHECK (tipo IN ('DEPLOY', 'UPDATE', 'START', 'STOP', 'DESTROY')),
+    estado              TEXT NOT NULL DEFAULT 'PENDING' CHECK (estado IN ('PENDING', 'IN_PROGRESS', 'REJECTED', 'COMPENSATED', 'COMPLETED', 'FAILED')),
+    workflow_id         TEXT UNIQUE,                     -- id del workflow temporal
+    plan                JSONB,                                 -- changeset congelado
+    error               JSONB,                                 -- errores del despliegue
+    solicitado_por      INTEGER NOT NULL REFERENCES auth.usuario(id),
+    created_at          TIMESTAMP NOT NULL DEFAULT now(),
+    finished_at         TIMESTAMP
+);
+
+CREATE UNIQUE INDEX uq_deployment_slice_activo ON slices.deployment (slice_id, workflow_id);
+CREATE UNIQUE INDEX uq_deployment_slice_version ON slices.deployment (slice_id) WHERE estado IN ('PENDING', 'IN_PROGRESS');
 
 
 -- slices — reservas (libro de VM Placement)
-
 CREATE TABLE slices.reserva_nodo (
     id                  SERIAL PRIMARY KEY,
     servidor_id         INTEGER NOT NULL REFERENCES slices.servidor(id),
-    nodo_id             INTEGER NOT NULL REFERENCES slices.slice_nodo(id),
-    slice_version_id    INTEGER NOT NULL REFERENCES slices.slice_version(id),
+    nodo_id             UUID NOT NULL REFERENCES slices.slice_nodo(id),
+    createdby_deployment_id    INTEGER NOT NULL REFERENCES slices.deployment(id),
     recurso             TEXT NOT NULL,      -- 'vcpu', 'vram_mb', 'vdisk_mb'.
     cantidad_reservada  INTEGER NOT NULL CHECK (cantidad_reservada > 0),
     estado              TEXT NOT NULL DEFAULT 'RESERVED' CHECK (estado IN ('RESERVED', 'RELEASED')),
@@ -292,13 +342,11 @@ CREATE UNIQUE INDEX uq_reserva_nodo_activa ON slices.reserva_nodo (nodo_id, recu
 CREATE INDEX idx_reservas_nodo ON slices.reserva_nodo(nodo_id);
 
 -- slices — aprobaciones
-
-CREATE TABLE slices.solicitudes_aprobacion (
+CREATE TABLE slices.solicitud_aprobacion (
     id                  SERIAL PRIMARY KEY,
-    slice_version_id    INTEGER NOT NULL REFERENCES slices.slice_version(id) ON DELETE CASCADE,
+    deployment_id       INTEGER NOT NULL REFERENCES slices.deployment(id) ON DELETE CASCADE,
     usuario_id          INTEGER NOT NULL REFERENCES auth.usuario(id),
-    tipo_solicitud      TEXT NOT NULL DEFAULT 'crear' CHECK (tipo_solicitud IN ('crear', 'ampliar_cuota')),
-    estado              TEXT NOT NULL DEFAULT 'PENDING' CHECK (estado IN ('PENDING', 'APPROVED', 'REJECTED')),
+    estado              TEXT NOT NULL DEFAULT 'VALIDATING' CHECK (estado IN ('VALIDATING', 'PENDING', 'APPROVED', 'REJECTED_BY_SYSTEM', 'REJECTED_BY_OPERATOR')),
     operador_id         INTEGER REFERENCES auth.usuario(id),
     fecha_sol           TIMESTAMP NOT NULL DEFAULT now(),
     motivo              TEXT

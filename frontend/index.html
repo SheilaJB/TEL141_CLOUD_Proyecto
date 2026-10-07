@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orquestador Cloud PUCP</title>
+    <style>
+        :root {
+            --primary-color: #003a6c; /* Azul PUCP */
+            --bg-color: #f4f7f6;
+            --card-bg: #ffffff;
+            --text-color: #333;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background-color: var(--card-bg);
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+        h1 {
+            color: var(--primary-color);
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+        p.subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background-color: #00284d;
+        }
+        button.secondary {
+            background-color: #6c757d;
+        }
+        button.secondary:hover {
+            background-color: #5a6268;
+        }
+        .error {
+            color: #dc3545;
+            font-size: 14px;
+            margin-top: 15px;
+            display: none;
+        }
+        .success-box {
+            background-color: #d4edda;
+            color: #155724;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            text-align: left;
+            word-wrap: break-word;
+        }
+        .hidden {
+            display: none;
+        }
+        #verify-result {
+            margin-top: 15px;
+            font-size: 13px;
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- PANTALLA DE LOGIN -->
+    <div class="container" id="login-view">
+        <h1>Orquestador Cloud PUCP</h1>
+        <p class="subtitle">Acceso a la plataforma</p>
+        
+        <form id="login-form">
+            <div class="form-group">
+                <label for="username">Código de Usuario</label>
+                <input type="text" id="username" placeholder="ej. admin_pucp" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Contraseña</label>
+                <input type="password" id="password" placeholder="••••••••" required>
+            </div>
+            <button type="submit" id="btn-login">Ingresar</button>
+            <div id="login-error" class="error">Credenciales incorrectas o error de red.</div>
+        </form>
+    </div>
+
+    <!-- PANTALLA DE DASHBOARD (Panel de Control) -->
+    <div class="container hidden" id="dashboard-view">
+        <h1>Orquestador Cloud PUCP</h1>
+        <p class="subtitle">Bienvenido al Panel de Control</p>
+
+        <div class="success-box" id="user-info">
+            <!-- Aquí inyectaremos los datos del JWT -->
+        </div>
+
+        <button id="btn-verify">Probar conexión con API Gateway (Verify)</button>
+        <div id="verify-result" class="hidden"></div>
+        <br>
+        <button class="secondary" id="btn-logout">Cerrar Sesión</button>
+    </div>
+
+    <script>
+        // CONFIGURACIÓN: Apuntamos al API GATEWAY (Puerto 8080), NO al servicio Auth directo.
+        const API_GATEWAY_URL = "http://localhost:8080/api/v1";
+
+        // Elementos del DOM
+        const loginView = document.getElementById('login-view');
+        const dashboardView = document.getElementById('dashboard-view');
+        const loginForm = document.getElementById('login-form');
+        const loginError = document.getElementById('login-error');
+        const userInfoBox = document.getElementById('user-info');
+        const btnVerify = document.getElementById('btn-verify');
+        const verifyResult = document.getElementById('verify-result');
+        const btnLogout = document.getElementById('btn-logout');
+
+        // Al cargar la página, revisar si ya tenemos un token guardado
+        window.onload = () => {
+            const token = localStorage.getItem("jwt_token");
+            if (token) {
+                showDashboard();
+            }
+        };
+
+        // LÓGICA DE INICIO DE SESIÓN
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            loginError.style.display = 'none';
+            const btn = document.getElementById('btn-login');
+            btn.innerText = "Conectando...";
+
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                // Hacemos FETCH hacia el API Gateway
+                const response = await fetch(`${API_GATEWAY_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    // Guardamos el token en el almacenamiento del navegador
+                    localStorage.setItem("jwt_token", data.access_token);
+                    localStorage.setItem("user_role", data.rol);
+                    localStorage.setItem("user_level", data.nivel || 'N/A');
+                    showDashboard();
+                } else {
+                    loginError.innerText = "Credenciales incorrectas.";
+                    loginError.style.display = 'block';
+                }
+            } catch (error) {
+                console.error("Error:", error);
+                loginError.innerText = "Error de red. ¿Está encendido el API Gateway?";
+                loginError.style.display = 'block';
+            } finally {
+                btn.innerText = "Ingresar";
+            }
+        });
+
+        // LÓGICA DEL BOTÓN VERIFICAR (Ruta protegida)
+        btnVerify.addEventListener('click', async () => {
+            const token = localStorage.getItem("jwt_token");
+            verifyResult.classList.remove('hidden');
+            verifyResult.innerHTML = "<i>Consultando al API Gateway...</i>";
+
+            try {
+                const response = await fetch(`${API_GATEWAY_URL}/auth/verify`, {
+                    method: 'GET',
+                    headers: { 
+                        'Authorization': `Bearer ${token}` 
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    verifyResult.innerHTML = `<b>¡Token Válido!</b><br>El API Gateway lo enrutó y Auth lo verificó.<br><br><b>Respuesta:</b><br><pre>${JSON.stringify(data, null, 2)}</pre>`;
+                    verifyResult.style.color = "green";
+                } else {
+                    verifyResult.innerHTML = "<b>Error:</b> Token inválido o expirado.";
+                    verifyResult.style.color = "red";
+                }
+            } catch (error) {
+                verifyResult.innerHTML = "<b>Error de Red:</b> No se pudo contactar al API Gateway.";
+                verifyResult.style.color = "red";
+            }
+        });
+
+        // LÓGICA CERRAR SESIÓN
+        btnLogout.addEventListener('click', () => {
+            localStorage.clear();
+            loginForm.reset();
+            verifyResult.classList.add('hidden');
+            loginView.classList.remove('hidden');
+            dashboardView.classList.add('hidden');
+        });
+
+        // UTILIDAD: Mostrar panel de control
+        function showDashboard() {
+            loginView.classList.add('hidden');
+            dashboardView.classList.remove('hidden');
+            
+            const rol = localStorage.getItem("user_role");
+            const nivel = localStorage.getItem("user_level");
+            
+            userInfoBox.innerHTML = `
+                <strong>¡Autenticación Exitosa!</strong><br><br>
+                <b>Rol:</b> ${rol}<br>
+                <b>Nivel:</b> ${nivel}<br><br>
+                <i style="font-size: 11px;">JWT guardado en localStorage.</i>
+            `;
+        }
+    </script>
+</body>
+</html>

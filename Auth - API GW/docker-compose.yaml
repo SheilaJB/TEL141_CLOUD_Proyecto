@@ -1,0 +1,16 @@
+services:
+  edge:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      JWT_PRIVATE_KEY_PATH: /run/edge-keys/jwt-private.pem
+      JWT_PUBLIC_KEY_PATH: /run/edge-keys/jwt-public.pem
+      TLS_CERT_PATH: /run/edge-keys/edge.crt
+      TLS_KEY_PATH: /run/edge-keys/edge.key
+      CA_CERT_PATH: /run/edge-keys/ca.crt
+    ports:
+      - "${EDGE_PORT:-443}:8443"
+    volumes:
+      - "${EDGE_KEYS_DIR:?Set EDGE_KEYS_DIR to the directory containing your keys and certificates}:/run/edge-keys:ro"

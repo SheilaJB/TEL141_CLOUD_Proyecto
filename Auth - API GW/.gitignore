@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+!README.md
+certs/
+keys/
+*.pem
+*.key
+*.crt
+__pycache__/
+.pytest_cache/
+.venv/

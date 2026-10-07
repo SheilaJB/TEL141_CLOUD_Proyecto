@@ -96,11 +96,24 @@ El orden de la reserva es:
 
 La reserva condicional valida servidor activo, zona correcta y capacidad efectiva suficiente. PostgreSQL es el arbitro ante carreras concurrentes.
 
-Para retries, el servicio busca reservas activas existentes para la `slice_version`:
+La idempotencia debe resolverse dentro del modulo, aunque Temporal sea quien
+decida si reintenta una Activity. Temporal puede repetir una Activity despues
+de un commit de PostgreSQL y antes de recibir su resultado.
 
-- si la reserva completa coincide con el plan, devuelve el placement existente sin volver a incrementar contadores;
-- si existe una reserva parcial o distinta, informa una inconsistencia;
-- si no existe reserva, ejecuta la transaccion normal.
+El flujo idempotente objetivo es:
+
+```text
+1. Consultar la reserva persistida antes de ejecutar snapshot y solver.
+2. Si existe una reserva completa, devolverla sin volver a planificar.
+3. Si existe una reserva parcial o inconsistente, informar un error de estado.
+4. Si no existe reserva, leer snapshot, resolver y reservar atomicamente.
+```
+
+El codigo actual consulta reservas dentro de `reserve`, despues de que el
+solver ya genero un nuevo plan. Por eso dos llamadas pueden producir planes
+distintos para la misma version y zona, aunque ambos sean factibles. La
+comparacion actual evita duplicar contadores, pero todavia no implementa el
+flujo idempotente objetivo: esa mejora esta pendiente.
 
 La liberacion no pertenece al modulo inicial. La compensacion posterior a un fallo de provisioning queda en el orquestador o en otro modulo.
 
@@ -169,6 +182,11 @@ sliceVersionId + zonaId
         v
 PlacementServiceImpl
         |
+        +--> consulta de reserva existente (pendiente de adelantar)
+        |          |
+        |          +--> completa: devolver asignacion persistida
+        |          +--> parcial: error de estado
+        |
         +--> PlacementSnapshotService.loadProblem(...)
         |          |
         |          v
@@ -194,6 +212,24 @@ Errores principales:
 - `ReservationStateException`: ya existe una reserva parcial o diferente;
 - errores transitorios de PostgreSQL: retryable para Temporal;
 - version, zona o plan invalido: no retryable salvo que la capa superior lo corrija.
+
+El modulo debe conservar la causa tecnica y una clasificacion estable para que
+el adapter de Temporal no tenga que interpretar mensajes SQL.
+
+### 4.1 Clasificacion propuesta para Temporal
+
+| Categoria | Excepciones o causas | Tratamiento sugerido |
+|---|---|---|
+| `RETRYABLE_RESOURCE_CONFLICT` | `ReservationConflictException`, otra colocacion consumio capacidad | Reintentar con snapshot y solver nuevos |
+| `RETRYABLE_DATABASE` | timeout, conexion perdida, deadlock o serialization failure | Reintentar con backoff y limite |
+| `NON_RETRYABLE_NO_SOLUTION` | `NoPlacementSolutionException` | Fallar la Activity |
+| `NON_RETRYABLE_INVALID_INPUT` | version/zona inexistente, plan con identidad incorrecta o recursos invalidos | Fallar sin retry indefinido |
+| `NON_RETRYABLE_INCONSISTENT_STATE` | `ReservationStateException`, reserva parcial o contradictoria | Detener y alertar/compensar |
+| `NON_RETRYABLE_CONFIGURATION` | bean faltante, SQL invalido, error de mapeo o solver mal configurado | Fallar y corregir despliegue |
+| `UNKNOWN` | causa no clasificada | Politica conservadora, sin retry infinito |
+
+La jerarquia final de excepciones y el mapeo a `ApplicationFailure` de Temporal
+aun no estan implementados.
 
 ## 5. Estructura real del proyecto
 
@@ -447,17 +483,20 @@ El esquema ya contempla `RESERVED` y `PROVISIONING` en los estados de `slice_ver
 - Adapter interno inicial para Timefold 2.6.0.
 - Reserva transaccional de contadores y auditoria.
 - Verificacion tecnica de zona en el plan y la reserva.
-- Idempotencia para una reserva completa repetida.
+- Deteccion de reservas activas dentro de la operacion de reserva.
 - `PlacementServiceImpl` registrado como bean Spring.
 
 ### Pendiente inmediato
 
 1. Confirmar mediante compilacion la API exacta de Timefold 2.6.0. En particular, revisar imports de `HardSoftScore`, la comprobacion de factibilidad y la configuracion `SolverConfig`, porque la version concreta puede diferir de ejemplos de otras versiones.
 2. Revisar y completar el mapeo JPA, especialmente relaciones lazy y nombres de columnas, contra el esquema ejecutado.
-3. Validar que el plan tenga exactamente un assignment por cada nodo solicitado antes de escribir reservas.
-4. Evitar que una reserva parcial concurrente sea interpretada como placement completo sin una comprobacion adicional de cardinalidad y recursos.
-5. Clasificar formalmente excepciones retryable y no retryable para Temporal.
-6. Añadir pruebas de score, capacidad, rollback, carrera, zona e idempotencia.
+3. Adelantar la consulta de reserva persistida antes de snapshot y Timefold para que un retry confirmado no replantee.
+4. Validar que la reserva existente sea completa: todos los nodos y sus tres recursos esperados.
+5. Validar que el plan tenga exactamente un assignment por cada nodo solicitado antes de escribir reservas.
+6. Evitar que una reserva parcial concurrente sea interpretada como placement completo sin una comprobacion adicional de cardinalidad y recursos.
+7. Clasificar formalmente excepciones retryable y no retryable para Temporal.
+8. Añadir pruebas de score, capacidad, rollback, carrera, zona y retry idempotente.
+
 
 ### Fuera del MVP
 

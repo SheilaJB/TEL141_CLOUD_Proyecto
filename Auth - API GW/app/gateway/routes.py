@@ -13,6 +13,7 @@ AUTHENTICATED = RoutePolicy(public=False, roles=ALL_ROLES)
 USER_MANAGERS = RoutePolicy(public=False, roles=frozenset({"operador", "admin"}))
 CONSUMERS_AND_OPERATORS = RoutePolicy(public=False, roles=ALL_ROLES)
 OPERATORS = RoutePolicy(public=False, roles=frozenset({"operador"}))
+OPERATORS_AND_ADMINS = RoutePolicy(public=False, roles=frozenset({"operador", "admin"}))
 ADMIN = RoutePolicy(public=False, roles=frozenset({"admin"}))
 
 
@@ -35,6 +36,12 @@ def policy_for(path: str, method: str) -> RoutePolicy | None:
         return ADMIN
     if path.startswith("/auth/usuarios/") and method == "PATCH":
         return ADMIN
+    if (
+        method == "POST"
+        and path.startswith("/slices/deployments/")
+        and path.endswith("/approve")
+    ):
+        return OPERATORS_AND_ADMINS
     if path == "/slices/aprobaciones" or path.startswith("/slices/aprobaciones/"):
         return OPERATORS
     if path == "/slices" or path.startswith("/slices/"):

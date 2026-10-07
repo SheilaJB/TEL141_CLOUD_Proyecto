@@ -3,3 +3,4 @@ preguntas.md
 Scripts validacion/
 *.md
 .env
+*.rst

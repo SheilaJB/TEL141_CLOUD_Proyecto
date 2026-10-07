@@ -1,3 +1,5 @@
+# Solo DB. Para integración, levantar compose de Orquestador.
+
 services:
   db:
     image: postgres:16
@@ -5,7 +7,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: cloud_admin
-      POSTGRES_PASSWORD: cloud_g3
+      POSTGRES_PASSWORD: cloud_admin
       POSTGRES_DB: cloud_g3
     ports:
       - "5432:5432"

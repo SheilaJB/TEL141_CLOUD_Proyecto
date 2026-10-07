@@ -1,0 +1,11 @@
+ORCHESTRATOR_QUEUE = "orchestrator-queue"
+LINUX_QUEUE = "linux-queue"
+OPENSTACK_QUEUE = "openstack-queue"
+
+ACTIVITY_GET_PLAN = "get_plan"
+ACTIVITY_GET_APPROVAL_STATE = "get_approval_state"
+ACTIVITY_START_DEPLOYMENT = "start_deployment"
+ACTIVITY_RECORD_ROUND_FACTS = "record_round_facts"
+ACTIVITY_FINISH_DEPLOYMENT = "finish_deployment"
+ACTIVITY_RESERVE_PLACEMENT = "reserve"
+ACTIVITY_ROLLBACK_PLACEMENT = "rollback_reservation"

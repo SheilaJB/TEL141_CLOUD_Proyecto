@@ -302,7 +302,8 @@ CREATE TABLE slices.slice_enlace_puerto (
 
 CREATE INDEX idx_slice_nodos_version ON slices.slice_nodo(defin_version_id);
 CREATE INDEX idx_slice_enlaces_version ON slices.slice_enlace(defin_version_id);
-
+CREATE UNIQUE INDEX uq_nodo_name_vivo ON slices.slice_nodo (slice_id, name) WHERE estado_nodo <> 'DELETED';
+CREATE UNIQUE INDEX uq_enlace_name_vivo ON slices.slice_enlace (slice_id, name);
 
 -- slices — despliegue (workflows de cambios de slice)
 CREATE TABLE slices.deployment (             -- una fila por intento. ejem. actualizar versión A a la B

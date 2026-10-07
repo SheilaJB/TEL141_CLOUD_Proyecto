@@ -1,0 +1,100 @@
+@baseUrl = https://localhost:8443
+@consumerCodigo = 20260001
+@consumerPassword = consumidor
+@operatorCodigo = operador
+@operatorPassword = operador
+@runId = {{$guid}}
+
+@consumerToken = {{consumerLogin.response.body.$.access_token}}
+@consumerRefreshToken = {{consumerLogin.response.body.$.refresh_token}}
+
+@operatorToken = {{operatorLogin.response.body.$.access_token}}
+@operatorRefreshToken = {{operatorLogin.response.body.$.refresh_token}}
+
+@sliceId = {{createSlice.response.body.$.slice_id}}
+@versionNumber = {{createSlice.response.body.$.numero_version}}
+@deploymentId = {{deploy.response.body.$.deployment_id}}
+
+### Login as the basic-tier consumer who will own the test slice
+# This role creates the slice and requests Deploy.
+# @name consumerLogin
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "codigo": "{{consumerCodigo}}",
+  "password": "{{consumerPassword}}",
+  "client": "cli"
+}
+
+### Login separately as operator
+# This role approves the pending basic-tier deployment.
+# @name operatorLogin
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "codigo": "{{operatorCodigo}}",
+  "password": "{{operatorPassword}}",
+  "client": "cli"
+}
+
+### Create the slice and version 1 with a valid non-public topology
+# Zone 1 (linx-1) permits the seeded basic-tier consumer.
+# Non-public VMs do not require a capabilities file.
+# @name createSlice
+POST {{baseUrl}}/slices
+Authorization: Bearer {{consumerToken}}
+Content-Type: application/json
+
+{
+  "name": "deploy-approval-{{runId}}",
+  "zona_id": 1,
+  "spec": {
+    "schema_version": 1,
+    "vms": [
+      {
+        "name": "vm-a-{{runId}}",
+        "flavor": "micro-v1",
+        "image": "Cirros",
+        "public": false
+      },
+      {
+        "name": "vm-b-{{runId}}",
+        "flavor": "micro-v1",
+        "image": "Cirros",
+        "public": false
+      }
+    ],
+    "links": [
+      {
+        "name": "lan-{{runId}}",
+        "endpoints": ["vm-a-{{runId}}", "vm-b-{{runId}}"]
+      }
+    ]
+  }
+}
+
+### Validate the persisted definition before creating a deployment
+POST {{baseUrl}}/slices/{{sliceId}}/versions/{{versionNumber}}/validate
+Authorization: Bearer {{consumerToken}}
+
+### Inspect the preview plan (preview UUIDs differ from real Deploy UUIDs)
+POST {{baseUrl}}/slices/{{sliceId}}/versions/{{versionNumber}}/plan
+Authorization: Bearer {{consumerToken}}
+
+### Start the real Deploy from the persisted spec; this request has no body
+# The basic-tier deployment should be created as PENDING approval.
+# @name deploy
+POST {{baseUrl}}/slices/{{sliceId}}/versions/{{versionNumber}}/deploy
+Authorization: Bearer {{consumerToken}}
+
+### Approve the deployment as the separate operator identity
+POST {{baseUrl}}/slices/deployments/{{deploymentId}}/approve
+Authorization: Bearer {{operatorToken}}
+Content-Type: application/json
+
+{
+  "approved": true,
+  "reason": "Approved for workflow integration test"
+}

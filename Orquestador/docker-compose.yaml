@@ -1,0 +1,153 @@
+# Orquestador TEL141-G3
+name: Slice Orchestrator
+
+services:
+  # PostgreSQL: DB aplicación + DBs Temporal
+  # Roles: "postgres" (bootstrap, solo init), APP_DB_USER (servicios), TEMPORAL_DB_USER (Temporal).
+  postgres:
+    image: postgres:${POSTGRESQL_VERSION:-16}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-cloud_g3}
+
+      APP_DB_USER: ${APP_DB_USER:-cloud_admin}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      TEMPORAL_DB_USER: ${TEMPORAL_DB_USER:-temporal}
+      TEMPORAL_DB_PASSWORD: ${TEMPORAL_DB_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Solo corren al crear el volumen por primera vez, en orden alfabético.
+      - ../db/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+      - ../db/20-roles.sh:/docker-entrypoint-initdb.d/20-roles.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-cloud_g3}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Temporal: 1) crea y migra las DBs temporal y temporal_visibility ──────
+  temporal-db-setup:
+    image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION}
+    restart: on-failure:6
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: ${TEMPORAL_DB_USER:-temporal}
+      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD}
+      POSTGRES_SEEDS: postgres
+      SQL_PASSWORD: ${TEMPORAL_DB_PASSWORD}
+    volumes:
+      - ./temporalio/scripts:/scripts:ro
+    entrypoint: ["/bin/sh"]
+    command: /scripts/setup-postgres.sh
+
+  # ── 2) Temporal Server ────────────────────────────────────────────────────
+  temporal:
+    image: temporalio/server:${TEMPORAL_VERSION}
+    restart: unless-stopped
+    depends_on:
+      temporal-db-setup:
+        condition: service_completed_successfully
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: ${TEMPORAL_DB_USER:-temporal}
+      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD}
+      POSTGRES_SEEDS: postgres
+      BIND_ON_IP: 0.0.0.0
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+    ports:
+      - "7233:7233"
+    volumes:
+      - ./temporalio/dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7233"]
+      interval: 5s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  # ── 3) Registra el namespace (el server solo no lo crea) ──────────────────
+  temporal-create-namespace:
+    image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION}
+    restart: on-failure:5
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      DEFAULT_NAMESPACE: ${ORCHESTRATOR_TEMPORAL_NAMESPACE:-default}
+    volumes:
+      - ./temporalio/scripts:/scripts:ro
+    entrypoint: ["/bin/sh"]
+    command: /scripts/create-namespace.sh
+
+  temporal-ui:
+    image: temporalio/ui:${TEMPORAL_UI_VERSION}
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:5173
+    ports:
+      - "8080:8080"
+
+  # ── Slice Manager (API + cliente de Temporal) ─────────────────────────────
+  slice-manager:
+    build:
+      context: .                      # raíz del repo: necesita contracts/
+      dockerfile: slice_manager/Dockerfile
+    # restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      temporal-create-namespace:
+        condition: service_completed_successfully
+    environment:
+      ORCHESTRATOR_DATABASE_URL: postgresql://${APP_DB_USER:-cloud_admin}:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-cloud_g3}
+      ORCHESTRATOR_TEMPORAL_ADDRESS: temporal:7233
+      ORCHESTRATOR_TEMPORAL_NAMESPACE: ${ORCHESTRATOR_TEMPORAL_NAMESPACE:-default}
+      ORCHESTRATOR_TEMPORAL_TASK_QUEUE: ${ORCHESTRATOR_TEMPORAL_TASK_QUEUE:-orchestrator-queue}
+      ORCHESTRATOR_INTERNAL_SERVICE_TOKEN: ${ORCHESTRATOR_INTERNAL_SERVICE_TOKEN}
+      APPROVAL_TIMEOUT_SECONDS: ${APPROVAL_TIMEOUT_SECONDS:-86400}
+      # ORCHESTRATOR_CAPABILITIES_DIR: /app/capabilities
+    # volumes:
+    #   - .Orquestador/capabilities:/app/capabilities:ro
+    ports:
+      - "${SLICE_MANAGER_PORT:-8000}:8000"
+
+  # ── Worker del orquestador (workflows + activities de registro/placement) ─
+  orchestrator-worker:
+    build:
+      context: .
+      dockerfile: temporal_worker/Dockerfile
+    # restart: on-failure
+    depends_on:
+      temporal:
+        condition: service_healthy
+      temporal-create-namespace:
+        condition: service_completed_successfully
+      slice-manager:
+        condition: service_started
+    environment:
+      ORCHESTRATOR_TEMPORAL_ADDRESS: temporal:7233
+      ORCHESTRATOR_TEMPORAL_NAMESPACE: ${ORCHESTRATOR_TEMPORAL_NAMESPACE:-default}
+      ORCHESTRATOR_TEMPORAL_TASK_QUEUE: ${ORCHESTRATOR_TEMPORAL_TASK_QUEUE:-orchestrator-queue}
+      ORCHESTRATOR_SLICE_MANAGER_URL: http://slice-manager:8000
+      ORCHESTRATOR_INTERNAL_SERVICE_TOKEN: ${ORCHESTRATOR_INTERNAL_SERVICE_TOKEN}
+      APPROVAL_TIMEOUT_SECONDS: ${APPROVAL_TIMEOUT_SECONDS:-86400}
+
+volumes:
+  pgdata:

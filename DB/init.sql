@@ -50,7 +50,7 @@ CREATE TABLE auth.usuario (
 INSERT INTO auth.usuario (codigo, hash_password, rol_id, nivel_id, creado_por) VALUES
     ('20260001', '$argon2id$v=19$m=16,t=2,p=1$R3pXUEhxWGR1WnhNQkUzTw$iwIAr8qyKxalgV/SWVkYug', 1, 1, NULL),  -- usuario consumidor basico 20260001-consumidor
     ('20260002', '$argon2id$v=19$m=16,t=2,p=1$MDZ2aHZsM0JHb3ZsaG5KRg$4jxDWd4T0xs1kTZxt3ttWg', 1, 2, NULL),  -- usuario consumidor avanzado 20260002-consumidor
-    ('operator', '$argon2id$v=19$m=16,t=2,p=1$OThZM2RRaU00NEZxbFM4bw$zg1BBvSyLTDCxVxnpAI1Yg', 2, NULL, NULL),  -- usuario operador-operador
+    ('operador', '$argon2id$v=19$m=16,t=2,p=1$OThZM2RRaU00NEZxbFM4bw$zg1BBvSyLTDCxVxnpAI1Yg', 2, NULL, NULL),  -- usuario operador-operador
     ('admin', '$argon2id$v=19$m=16,t=2,p=1$OThZM2RRaU00NEZxbFM4bw$JROgUqUKhYFy7sPqed/VWg', 3, NULL, NULL);     -- usuario admin-admin
 
 CREATE TABLE auth.refresh_token (

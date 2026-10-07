@@ -17,7 +17,7 @@ def decode_access_token(token: str, public_key: str) -> Claims:
         issuer=ISSUER,
         audience=AUDIENCE,
         options={
-            "require": ["exp", "iat", "sub", "jti", "cod", "rol", "nivel"],
+            "require": ["exp", "iat", "sub", "jti", "cod", "rol"],
         },
     )
     try:

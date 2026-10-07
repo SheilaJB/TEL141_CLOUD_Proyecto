@@ -1,0 +1,79 @@
+@baseUrl = https://localhost:8443
+@codigo = admin
+@password = admin
+@userId = 1
+@accessToken = {{login.response.body.$.access_token}}
+@loginRefreshToken = {{login.response.body.$.refresh_token}}
+@rotatedRefreshToken = {{refresh.response.body.$.refresh_token}}
+
+### Health check
+GET {{baseUrl}}/healthz
+
+### Login as CLI (returns access and refresh tokens in JSON)
+# Replace @codigo and @password with an active DB account.
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "codigo": "{{codigo}}",
+  "password": "{{password}}",
+  "client": "cli"
+}
+
+### Current user
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{accessToken}}
+
+### Create a user (admin only)
+POST {{baseUrl}}/auth/usuarios
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "codigo": "new-consumer",
+  "password": "change-this-password-123",
+  "rol": "consumidor",
+  "nivel": "basico"
+}
+
+### Update a user (admin only)
+PATCH {{baseUrl}}/auth/usuarios/{{userId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "estado": "INACTIVE"
+}
+
+### Refresh tokens (CLI: send the current refresh token in JSON)
+# Run once after login. This rotates the token; use the new token in later
+# refresh/logout requests. Reusing the old token revokes its whole family.
+# @name refresh
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "{{loginRefreshToken}}"
+}
+
+### Logout without refreshing (uses the refresh token returned by login)
+POST {{baseUrl}}/auth/logout
+Content-Type: application/json
+
+{
+  "refresh_token": "{{loginRefreshToken}}"
+}
+
+### Logout after refreshing (uses the rotated refresh token)
+POST {{baseUrl}}/auth/logout
+Content-Type: application/json
+
+{
+  "refresh_token": "{{rotatedRefreshToken}}"
+}
+
+### Example proxied request to CRUDs
+# Replace /your-existing-resource with a real GET route exposed by cruds.
+GET {{baseUrl}}/cruds/your-existing-resource
+Authorization: Bearer {{accessToken}}

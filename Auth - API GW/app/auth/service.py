@@ -169,21 +169,6 @@ class AuthService:
                         await session.execute(
                             text(
                                 """
-                                UPDATE auth.refresh_token
-                                SET revocado_en = :revoked_at,
-                                    reemplazado_por = :replacement_id
-                                WHERE id = :token_id
-                                """
-                            ),
-                            {
-                                "revoked_at": revoked_at,
-                                "replacement_id": refresh_id,
-                                "token_id": token_row["id"],
-                            },
-                        )
-                        await session.execute(
-                            text(
-                                """
                                 INSERT INTO auth.refresh_token
                                     (id, usuario_id, familia_id, token_hash, expira_en)
                                 VALUES
@@ -198,6 +183,21 @@ class AuthService:
                                     result.refresh_token
                                 ),
                                 "expires_at": refresh_expires,
+                            },
+                        )
+                        await session.execute(
+                            text(
+                                """
+                                UPDATE auth.refresh_token
+                                SET revocado_en = :revoked_at,
+                                    reemplazado_por = :replacement_id
+                                WHERE id = :token_id
+                                """
+                            ),
+                            {
+                                "revoked_at": revoked_at,
+                                "replacement_id": refresh_id,
+                                "token_id": token_row["id"],
                             },
                         )
 

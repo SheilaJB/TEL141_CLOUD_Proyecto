@@ -14,19 +14,9 @@ dependencies = [
     "PyJWT[crypto]>=2.8,<3",
     "pydantic>=2.6,<3",
     "pydantic-settings>=2.2,<3",
-    "SQLAlchemy>=2.0,<3",
+    "SQLAlchemy[asyncio]>=2.0,<3",
     "uvicorn[standard]>=0.27,<1",
 ]
-
-[project.optional-dependencies]
-test = [
-    "pytest>=8,<9",
-    "pytest-asyncio>=0.23,<1",
-]
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]

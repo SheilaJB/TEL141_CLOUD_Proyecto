@@ -1,4 +1,3 @@
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,9 +18,6 @@ from app.gateway.routes import is_gateway_path, policy_for
 from app.shared.database import create_database
 from app.shared.denylist import Denylist
 from app.shared.jwt_tokens import decode_access_token
-
-logger = logging.getLogger(__name__)
-
 
 def _required_file(path: Path, setting_name: str) -> str:
     try:

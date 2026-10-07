@@ -13,4 +13,4 @@ services:
     ports:
       - "${EDGE_PORT:-443}:8443"
     volumes:
-      - "${EDGE_KEYS_DIR:?Set EDGE_KEYS_DIR to the directory containing your keys and certificates}:/run/edge-keys:ro"
+      - ${EDGE_KEYS_DIR}:/run/edge-keys:ro

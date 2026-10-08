@@ -1,10 +1,16 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
+COPY pyproject.toml ./
 COPY app/ ./app/
+RUN pip install --no-cache-dir .
 
-# Exponemos el 8000 pero uvicorn arranca en el 8000 interno
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+RUN useradd --system --uid 10001 edgeuser && chown -R edgeuser /app
+USER edgeuser
+
+EXPOSE 8443
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8443", "--workers", "1", "--ssl-certfile", "/run/edge-keys/edge.crt", "--ssl-keyfile", "/run/edge-keys/edge.key"]

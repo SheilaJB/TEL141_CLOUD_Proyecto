@@ -1,7 +1,11 @@
 GUI/
-preguntas.md
 Scripts validacion/
 *.md
 .env
+!.env.example
 *.rst
 keys
+
+__pycache__/
+.pytest_cache/
+.venv/

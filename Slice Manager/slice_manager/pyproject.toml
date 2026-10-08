@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "slice-manager"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "asyncpg>=0.29,<1",
+    "fastapi>=0.110,<1",
+    "httpx>=0.27,<1",
+    "orchestrator-contracts>=0.1.0",
+    "pydantic>=2.6,<3",
+    "pydantic-settings>=2.2,<3",
+    "pyyaml>=6,<7",
+    "temporalio>=1.5,<2",
+    "uvicorn[standard]>=0.27,<1",
+]
+
+[tool.setuptools]
+packages = [
+    "slice_manager",
+    "slice_manager.app",
+    "slice_manager.app.api",
+    "slice_manager.app.domain",
+    "slice_manager.app.internal_api",
+    "slice_manager.app.planning",
+    "slice_manager.app.repositories",
+]
+package-dir = { "slice_manager" = "." }

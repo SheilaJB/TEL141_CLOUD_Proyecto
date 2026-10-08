@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tel141-auth"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "argon2-cffi>=23.1,<26",
+    "asyncpg>=0.28,<1",
+    "fastapi>=0.103,<1",
+    "passlib[argon2]>=1.7,<2",
+    "PyJWT[crypto]>=2.8,<3",
+    "cryptography>=41.0,<44",
+    "pydantic>=2.0,<3",
+    "uvicorn[standard]>=0.23,<1",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]

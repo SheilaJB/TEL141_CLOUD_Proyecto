@@ -1,22 +1,203 @@
+# Orquestador TEL141 - G3
+name: Cloud Slice Orchestrator
+
 services:
-  db:
+  # PostgreSQL: DB aplicación + DBs Temporal
+  postgres:
     image: postgres:16
-    container_name: cloud_tel141_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: cloud_admin
-      POSTGRES_PASSWORD: cloud_g3
-      POSTGRES_DB: cloud_g3
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-cloud_g3}
+
+      APP_DB_USER: ${APP_DB_USER:-cloud_admin}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      TEMPORAL_DB_USER: ${TEMPORAL_DB_USER:-temporal}
+      TEMPORAL_DB_PASSWORD: ${TEMPORAL_DB_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./DB/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+      - ./DB/20-roles.sh:/docker-entrypoint-initdb.d/20-roles.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cloud_admin -d cloud_g3"]
-      interval: 30s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-cloud_g3}"]
+      interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 20s
+    networks: [backend]
+
+  # Temporal: setup de DBs
+  temporal-db-setup:
+    image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION:-1.31.0}
+    restart: on-failure:6
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: ${TEMPORAL_DB_USER:-temporal}
+      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD}
+      POSTGRES_SEEDS: postgres
+      SQL_PASSWORD: ${TEMPORAL_DB_PASSWORD}
+    volumes:
+      - ./Slice Manager/temporalio/scripts:/scripts:ro
+    entrypoint: ["/bin/sh"]
+    command: /scripts/setup-postgres.sh
+    networks: [backend]
+
+  # Temporal Server
+  temporal:
+    image: temporalio/server:${TEMPORAL_VERSION:-1.31.0}
+    restart: unless-stopped
+    depends_on:
+      temporal-db-setup:
+        condition: service_completed_successfully
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: ${TEMPORAL_DB_USER:-temporal}
+      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD}
+      POSTGRES_SEEDS: postgres
+      BIND_ON_IP: 0.0.0.0
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+    volumes:
+      - ./Slice Manager/temporalio/dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7233"]
+      interval: 5s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    networks: [backend]
+
+  # Registro de namespace
+  temporal-create-namespace:
+    image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION:-1.31.0}
+    restart: on-failure:5
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      DEFAULT_NAMESPACE: ${ORCHESTRATOR_TEMPORAL_NAMESPACE:-default}
+    volumes:
+      - ./Slice Manager/temporalio/scripts:/scripts:ro
+    entrypoint: ["/bin/sh"]
+    command: /scripts/create-namespace.sh
+    networks: [backend]
+
+  temporal-ui:
+    image: temporalio/ui:${TEMPORAL_UI_VERSION:-2.55.0}
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:${EDGE_PORT:-8443}
+    ports:
+      - "${TEMPORAL_UI_PORT:-8080}:8080"
+    networks: [backend, public]
+
+  # Slice Manager (API + cliente Temporal)
+  slice-manager:
+    build:
+      context: ./Slice Manager
+      dockerfile: slice_manager/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      temporal-create-namespace:
+        condition: service_completed_successfully
+    environment:
+      ORCHESTRATOR_DATABASE_URL: postgresql://${APP_DB_USER:-cloud_admin}:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-cloud_g3}
+      ORCHESTRATOR_TEMPORAL_ADDRESS: temporal:7233
+      ORCHESTRATOR_TEMPORAL_NAMESPACE: ${ORCHESTRATOR_TEMPORAL_NAMESPACE:-default}
+      ORCHESTRATOR_TEMPORAL_TASK_QUEUE: ${ORCHESTRATOR_TEMPORAL_TASK_QUEUE:-orchestrator-queue}
+      ORCHESTRATOR_INTERNAL_SERVICE_TOKEN: ${ORCHESTRATOR_INTERNAL_SERVICE_TOKEN}
+      APPROVAL_TIMEOUT_SECONDS: ${APPROVAL_TIMEOUT_SECONDS:-86400}
+    networks: [backend]
+
+  # Worker del orquestador
+  orchestrator-worker:
+    build:
+      context: ./Slice Manager
+      dockerfile: temporal_worker/Dockerfile
+    depends_on:
+      temporal:
+        condition: service_healthy
+      temporal-create-namespace:
+        condition: service_completed_successfully
+      slice-manager:
+        condition: service_started
+    environment:
+      ORCHESTRATOR_TEMPORAL_ADDRESS: temporal:7233
+      ORCHESTRATOR_TEMPORAL_NAMESPACE: ${ORCHESTRATOR_TEMPORAL_NAMESPACE:-default}
+      ORCHESTRATOR_TEMPORAL_TASK_QUEUE: ${ORCHESTRATOR_TEMPORAL_TASK_QUEUE:-orchestrator-queue}
+      ORCHESTRATOR_SLICE_MANAGER_URL: http://slice-manager:8000
+      ORCHESTRATOR_INTERNAL_SERVICE_TOKEN: ${ORCHESTRATOR_INTERNAL_SERVICE_TOKEN}
+      ORCHESTRATOR_SIMULATED_PLACEMENT_SERVER_ID: ${ORCHESTRATOR_SIMULATED_PLACEMENT_SERVER_ID:-1}
+      APPROVAL_TIMEOUT_SECONDS: ${APPROVAL_TIMEOUT_SECONDS:-86400}
+    networks: [backend]
+
+  # Microservicio AuthAuthz (Stateful, emite RS256, rota refresh en Postgres)
+  auth:
+    build:
+      context: ./AuthAuthz
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${APP_DB_USER:-cloud_admin}:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-cloud_g3}
+      JWT_PRIVATE_KEY_PATH: ${JWT_PRIVATE_KEY_PATH:-/run/edge-keys/jwt-private.pem}
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/run/edge-keys/jwt-public.pem}
+      ACCESS_TTL_MIN: ${ACCESS_TTL_MIN:-15}
+      REFRESH_TTL_DAYS: ${REFRESH_TTL_DAYS:-7}
+      LOGIN_ATTEMPTS_PER_MINUTE: ${LOGIN_ATTEMPTS_PER_MINUTE:-5}
+    volumes:
+      - ${EDGE_KEYS_DIR:-./AuthAuthz/keys}:/run/edge-keys:ro
+    networks: [backend]
+
+  # API Gateway (100% Stateless, HTTPS en 8443, valida RS256, RBAC perimetral, inyecta X-Internal-Token)
+  api-gateway:
+    build:
+      context: ./CLIApiGateway/api-gateway
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      auth:
+        condition: service_started
+    environment:
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/run/edge-keys/jwt-public.pem}
+      TLS_CERT_PATH: ${TLS_CERT_PATH:-/run/edge-keys/edge.crt}
+      TLS_KEY_PATH: ${TLS_KEY_PATH:-/run/edge-keys/edge.key}
+      CA_CERT_PATH: ${CA_CERT_PATH:-/run/edge-keys/ca.crt}
+      AUTH_URL: ${AUTH_URL:-http://auth:8000}
+      ORCHESTRATOR_SLICE_MANAGER_URL: ${UPSTREAM_SLICE_MANAGER_URL:-http://slice-manager:8000}
+      CRUDS_URL: ${UPSTREAM_CRUDS_URL:-http://crud-service:8001}
+      IMAGE_MANAGER_URL: ${IMAGE_MANAGER_URL:-http://imagemanager:8000}
+      NETWORK_MANAGER_URL: ${NETWORK_MANAGER_URL:-http://networkmanager:8000}
+      ORCHESTRATOR_INTERNAL_SERVICE_TOKEN: ${ORCHESTRATOR_INTERNAL_SERVICE_TOKEN}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-${ORCHESTRATOR_INTERNAL_SERVICE_TOKEN}}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"]}
+    ports:
+      - "${EDGE_PORT:-8443}:8443"
+    volumes:
+      - ${EDGE_KEYS_DIR:-./AuthAuthz/keys}:/run/edge-keys:ro
+    networks: [backend, public]
+
+networks:
+  backend:
+    driver: bridge
+    internal: true
+  public:
+    driver: bridge
 
 volumes:
   pgdata:

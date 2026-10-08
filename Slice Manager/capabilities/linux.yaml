@@ -1,0 +1,10 @@
+supports:
+  # --- Deploy ---
+  set_public_access: false        # NAT / port-forward
+  apply_security_rules: false    # [OPEN] R5
+
+  # --- Update / Power (placeholder) ---
+  hot_resize: false
+  stop_start: false
+  hot_attach_port: false
+  hot_detach_port: false

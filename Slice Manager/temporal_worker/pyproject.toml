@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "temporal-worker"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27,<1",
+    "orchestrator-contracts>=0.1.0",
+    "pydantic>=2.6,<3",
+    "pydantic-settings>=2.2,<3",
+    "temporalio>=1.5,<2",
+]
+
+[tool.setuptools]
+packages = [
+    "temporal_worker",
+    "temporal_worker.worker",
+    "temporal_worker.worker.activities",
+    "temporal_worker.worker.workflows",
+]
+package-dir = { "temporal_worker" = "." }

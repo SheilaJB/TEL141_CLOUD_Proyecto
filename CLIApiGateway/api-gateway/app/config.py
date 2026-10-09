@@ -34,7 +34,8 @@ UPSTREAMS = {
     "auth": os.getenv("AUTH_URL", "http://auth:8000"),
     "slices": os.getenv("ORCHESTRATOR_SLICE_MANAGER_URL", os.getenv("SLICE_MANAGER_URL", "http://slice-manager:8000")),
     "cruds": os.getenv("CRUDS_URL", "http://crud-service:8001"),
-    "image": os.getenv("IMAGE_MANAGER_URL", "http://imagemanager:8000"),
+    "image": os.getenv("IMAGE_MANAGER_URL", "http://computemanager:8000"),
+    "vms": os.getenv("VM_MANAGER_URL", "http://computemanager:8000"),
     "network": os.getenv("NETWORK_MANAGER_URL", "http://networkmanager:8000"),
 }
 

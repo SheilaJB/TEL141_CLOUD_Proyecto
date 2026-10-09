@@ -182,7 +182,8 @@ services:
       AUTH_URL: ${AUTH_URL:-http://auth:8000}
       ORCHESTRATOR_SLICE_MANAGER_URL: ${UPSTREAM_SLICE_MANAGER_URL:-http://slice-manager:8000}
       CRUDS_URL: ${UPSTREAM_CRUDS_URL:-http://crud-service:8001}
-      IMAGE_MANAGER_URL: ${IMAGE_MANAGER_URL:-http://imagemanager:8000}
+      IMAGE_MANAGER_URL: ${IMAGE_MANAGER_URL:-http://computemanager:8000}
+      VM_MANAGER_URL: ${VM_MANAGER_URL:-http://computemanager:8000}
       NETWORK_MANAGER_URL: ${NETWORK_MANAGER_URL:-http://networkmanager:8000}
       ORCHESTRATOR_INTERNAL_SERVICE_TOKEN: ${ORCHESTRATOR_INTERNAL_SERVICE_TOKEN}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-${ORCHESTRATOR_INTERNAL_SERVICE_TOKEN}}
@@ -204,6 +205,26 @@ services:
       PUBLIC_NETWORK_CIDR: ${PUBLIC_NETWORK_CIDR:-10.60.5.0/24}
       GATEWAY_PUB_IP: ${GATEWAY_PUB_IP:-10.60.5.1}
       GATEWAY_EXT_IP: ${GATEWAY_EXT_IP:-10.20.11.124}
+    networks: [backend]
+
+  # Compute Manager (Image Manager + VM Manager + Adaptador Linux)
+  computemanager:
+    build:
+      context: ./Computer Manager
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${APP_DB_USER:-cloud_admin}:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-cloud_g3}
+      STORAGE_DIR: /app/Storage
+      COMPUTE_PUBLIC_URL: ${COMPUTE_PUBLIC_URL:-http://10.0.10.4:8001}
+      ALLOWED_WORKERS: ${ALLOWED_WORKERS:-10.0.10.1,10.0.10.2,10.0.10.3}
+      WORKER_SSH_USER: ${WORKER_SSH_USER:-ubuntu}
+      OVS_BRIDGE: ${OVS_BRIDGE:-br-int}
+    volumes:
+      - ./Computer Manager/Storage:/app/Storage
     networks: [backend]
 
 networks:

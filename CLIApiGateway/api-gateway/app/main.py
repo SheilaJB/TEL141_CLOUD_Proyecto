@@ -83,9 +83,13 @@ def _resolve_target_url(path: str, query: str = "") -> str:
         suffix = clean_path.removeprefix("/cruds")
         target = f"{base}/cruds{suffix}"
 
-    # 4. Image Manager
+    # 4. Compute Manager (Image y VMs)
     elif clean_path.startswith("/image"):
         base = UPSTREAMS["image"].rstrip("/")
+        target = f"{base}{clean_path}"
+
+    elif clean_path.startswith("/vms"):
+        base = UPSTREAMS["vms"].rstrip("/")
         target = f"{base}{clean_path}"
 
     # 5. Network Manager

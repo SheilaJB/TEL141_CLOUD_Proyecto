@@ -256,7 +256,9 @@ CREATE TABLE slices.slice_nodo (
     imagen_id           INTEGER NOT NULL REFERENCES slices.image(id),
     estado_nodo         TEXT NOT NULL DEFAULT 'PENDING' CHECK (
                             estado_nodo IN ('PENDING', 'RUNNING', 'STOPPED', 'FAILED', 'DELETED')
-                        )
+                        ),
+    pid                 INTEGER,
+    puerto_vnc          INTEGER
 );
 
 INSERT INTO slices.slice_nodo (slice_id, defin_version_id, name, flavor_id, imagen_id, estado_nodo) VALUES

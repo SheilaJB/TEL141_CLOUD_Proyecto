@@ -213,10 +213,15 @@ CREATE TABLE slices.slice (
                             estado IN ('DRAFT', 'UPDATING', 'RUNNING', 'STOPPED', 'FAILED', 'ELIMINATED')
                         ),
     zona_id          INTEGER REFERENCES slices.zona_disponibilidad(id),
+    vlan_s              INTEGER,
     version_activa_id   INTEGER,   -- FK tras crear slice_version, una por slice
     fecha_creacion      TIMESTAMP NOT NULL DEFAULT now(),
     fecha_modificacion  TIMESTAMP NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_slice_vlan_s_activa
+ON slices.slice (vlan_s)
+WHERE vlan_s IS NOT NULL AND estado IN ('UPDATING', 'RUNNING');
 
 INSERT INTO slices.slice (usuario_id, nombre, estado, zona_id, version_activa_id) VALUES
     (1, 'Slice de prueba 1', 'DRAFT', 1, NULL),

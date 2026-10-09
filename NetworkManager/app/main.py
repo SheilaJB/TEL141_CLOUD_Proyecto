@@ -241,10 +241,23 @@ async def get_ovs_commands(slice_id: int):
         )
         worker_cmds.append(OvsWorkerCommand(worker_id=w_id, commands=cmds))
 
-    # Comandos para el Gateway Centralizado
+    # Comandos para el Gateway Centralizado (NAT, Port Forwarding y DHCP estático)
+    pub_map = ipam.get_public_ips_for_slice(slice_id)
+    if not pub_map:
+        pub_map = {f"VM{slice_id}": f"10.60.5.{10 + slice_id}"}
+
+    vm_public_ips = list(pub_map.values())
+    ssh_forward_ports = {5000 + idx: ip for idx, ip in enumerate(vm_public_ips, start=1)}
+
+    vm_mac_ip_map = {}
+    for vm_id, ip in pub_map.items():
+        mac = ipam.generate_mac(seed_key=f"{slice_id}_{vm_id}_inet")
+        vm_mac_ip_map[mac] = ip
+
     gw_cmds = OvsCommandGenerator.generate_gateway_setup(
-        vm_public_ips=[f"10.60.5.{10 + slice_id}"],
-        ssh_forward_ports={5000 + slice_id: f"10.60.5.{10 + slice_id}"}
+        vm_public_ips=vm_public_ips,
+        ssh_forward_ports=ssh_forward_ports,
+        vm_mac_ip_map=vm_mac_ip_map
     )
 
     return OvsCommandResponse(

@@ -88,6 +88,11 @@ class IPAM:
             slice_pub[vm_key] = allocated_ip
             return (allocated_ip, config.internet_gw_ip)
 
+    def get_public_ips_for_slice(self, slice_id: int) -> Dict[str, str]:
+        """Retorna el mapa de {vm_id: ip_publica} para un slice."""
+        with self._lock:
+            return dict(self._public_ips.get(slice_id, {}))
+
     def release_slice(self, slice_id: int):
         """Libera los recursos de direccionamiento de un slice."""
         with self._lock:

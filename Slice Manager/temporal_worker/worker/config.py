@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     temporal_namespace: str = "default"
     temporal_task_queue: str = "orchestrator-queue"
     slice_manager_url: str = "http://localhost:8000"
+    network_manager_url: str = "http://networkmanager:8000"
     internal_service_token: str | None = None
 
 

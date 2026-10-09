@@ -75,13 +75,15 @@ class OvsCommandGenerator:
     @staticmethod
     def generate_gateway_setup(
         vm_public_ips: List[str] = None,
-        ssh_forward_ports: Dict[int, str] = None
+        ssh_forward_ports: Dict[int, str] = None,
+        vm_mac_ip_map: Dict[str, str] = None
     ) -> List[str]:
         """
         Genera la configuración de Capa 3 e IPtables en el Gateway (Server 4 / Master).
         - MASQUERADE de salida por ens3.
         - Bloqueo de tráfico hacia la red de gestión.
         - Port forwarding DNAT para acceso SSH entrante.
+        - Asignación DHCP estática por MAC con dnsmasq en br-inet.
         """
         br_inet = config.internet_bridge
         ens3 = config.management_iface
@@ -119,6 +121,19 @@ class OvsCommandGenerator:
                     f"sudo iptables -t nat -A PREROUTING -i {ens3} -p tcp --dport {external_port} "
                     f"-j DNAT --to-destination {vm_ip}:22"
                 )
+
+        # Servicio DHCP Estático en Gateway (dnsmasq asociado a MAC de interfaces públicas)
+        if vm_mac_ip_map:
+            cmds.append("sudo mkdir -p /etc/dnsmasq.d")
+            for mac, ip in vm_mac_ip_map.items():
+                cmds.append(
+                    f"echo 'dhcp-host={mac},{ip}' | sudo tee -a /etc/dnsmasq.d/slices_static.conf > /dev/null"
+                )
+            # Recargar o asegurar proceso dnsmasq escuchando en el puente público
+            cmds.append(
+                f"sudo pkill -HUP dnsmasq 2>/dev/null || "
+                f"sudo dnsmasq --interface={br_inet} --dhcp-confdir=/etc/dnsmasq.d --bind-interfaces --except-interface=lo 2>/dev/null || true"
+            )
 
         return cmds
 

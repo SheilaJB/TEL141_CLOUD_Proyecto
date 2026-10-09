@@ -192,6 +192,19 @@ services:
       - ${EDGE_KEYS_DIR:-./AuthAuthz/keys}:/run/edge-keys:ro
     networks: [backend, public]
 
+  # Network Manager (L2/L3 QinQ, IPAM, OVS Generator)
+  networkmanager:
+    build:
+      context: ./NetworkManager
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      MGMT_NETWORK_RESTRICTED: ${MGMT_NETWORK_RESTRICTED:-10.0.10.0/24}
+      PUBLIC_NETWORK_CIDR: ${PUBLIC_NETWORK_CIDR:-10.60.5.0/24}
+      GATEWAY_PUB_IP: ${GATEWAY_PUB_IP:-10.60.5.1}
+      GATEWAY_EXT_IP: ${GATEWAY_EXT_IP:-10.20.11.124}
+    networks: [backend]
+
 networks:
   backend:
     driver: bridge

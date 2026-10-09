@@ -35,7 +35,10 @@ async def run_worker() -> None:
         settings.slice_manager_url,
         settings.internal_service_token,
     )
-    activities = DeploymentActivities(slice_manager=slice_manager)
+    activities = DeploymentActivities(
+        slice_manager=slice_manager,
+        network_manager_url=settings.network_manager_url,
+    )
     worker = Worker(
         temporal_client,
         task_queue=settings.temporal_task_queue or ORCHESTRATOR_QUEUE,
@@ -48,6 +51,7 @@ async def run_worker() -> None:
             activities.finish_deployment,
             activities.reserve,
             activities.rollback_reservation,
+            activities.allocate_networking,
         ],
     )
     try:

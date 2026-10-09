@@ -14,6 +14,7 @@ from contracts.queues import (
     ACTIVITY_RESERVE_PLACEMENT,
     ACTIVITY_ROLLBACK_PLACEMENT,
     ACTIVITY_START_DEPLOYMENT,
+    ACTIVITY_ALLOCATE_NETWORKING,
     ORCHESTRATOR_QUEUE,
 )
 from contracts.registry import (
@@ -220,6 +221,15 @@ class DeployWorkflow:
                         type=ErrorCode.CONFLICT.value,
                         non_retryable=True,
                     )
+
+            # Ejecutar asignación de red en Network Manager (Patrón A síncrono post-Placement)
+            await self._execute_activity(
+                ACTIVITY_ALLOCATE_NETWORKING,
+                deployment_id,
+                allocation_by_node,
+                task_queue=ORCHESTRATOR_QUEUE,
+                start_to_close_timeout=timedelta(seconds=60),
+            )
 
             for round_num, actions in enumerate(context.plan.rounds, start=1):
                 facts, compensation_candidates, failures = await self._execute_round(

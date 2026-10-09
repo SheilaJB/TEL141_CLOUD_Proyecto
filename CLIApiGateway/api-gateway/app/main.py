@@ -77,10 +77,15 @@ def _resolve_target_url(path: str, query: str = "") -> str:
         else:
             target = f"{base}/api/v1/slices{suffix}"
 
-    # 3. CRUDs / Query Service
+    # 3. CRUDs / Query Service / Admin
     elif clean_path == "/cruds" or clean_path.startswith("/cruds/"):
         base = UPSTREAMS["cruds"].rstrip("/")
         suffix = clean_path.removeprefix("/cruds")
+        target = f"{base}/cruds{suffix}"
+
+    elif clean_path == "/admin" or clean_path.startswith("/admin/"):
+        base = UPSTREAMS["cruds"].rstrip("/")
+        suffix = clean_path.removeprefix("/admin")
         target = f"{base}/cruds{suffix}"
 
     # 4. Compute Manager (Image y VMs)

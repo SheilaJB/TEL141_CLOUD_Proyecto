@@ -227,6 +227,22 @@ services:
       - ./Computer Manager/Storage:/app/Storage
     networks: [backend]
 
+  # Query Service / CRUDs (Motor de lectura desacoplado, catálogo, cuotas, topologías)
+  crud-service:
+    build:
+      context: ./Query Service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${APP_DB_USER:-cloud_admin}:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-cloud_g3}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-${ORCHESTRATOR_INTERNAL_SERVICE_TOKEN}}
+      DB_POOL_MIN_SIZE: 2
+      DB_POOL_MAX_SIZE: 10
+    networks: [backend]
+
 networks:
   backend:
     driver: bridge

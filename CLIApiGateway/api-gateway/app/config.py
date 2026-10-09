@@ -89,13 +89,16 @@ def get_route_policy(path: str, method: str) -> Optional[RoutePolicy]:
     if path == "/slices" or path.startswith("/slices/"):
         return CONSUMERS_AND_OPERATORS
 
-    # CRUDs / Query Service
+    # CRUDs / Query Service / Admin views
     if path == "/cruds" or path.startswith("/cruds/"):
         if method == "GET":
             return AUTHENTICATED
         if method in {"POST", "PUT", "PATCH", "DELETE"}:
             return ADMIN
         return RoutePolicy(public=False)
+
+    if path == "/admin" or path.startswith("/admin/"):
+        return ADMIN
 
     # Image / Network
     if path.startswith("/image") or path.startswith("/network"):

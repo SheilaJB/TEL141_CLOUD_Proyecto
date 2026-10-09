@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     temporal_task_queue: str = "orchestrator-queue"
     slice_manager_url: str = "http://localhost:8000"
     network_manager_url: str = "http://networkmanager:8000"
+    compute_manager_url: str = "http://computemanager:8000"
     internal_service_token: str | None = None
 
 

@@ -38,6 +38,7 @@ async def run_worker() -> None:
     activities = DeploymentActivities(
         slice_manager=slice_manager,
         network_manager_url=settings.network_manager_url,
+        compute_manager_url=settings.compute_manager_url,
     )
     worker = Worker(
         temporal_client,
@@ -54,8 +55,24 @@ async def run_worker() -> None:
             activities.allocate_networking,
         ],
     )
+    linux_worker = Worker(
+        temporal_client,
+        task_queue="linux-queue",
+        activities=[
+            activities.create_vm,
+            activities.delete_vm,
+            activities.start_vm,
+            activities.stop_vm,
+            activities.resize_vm,
+            activities.set_public_access,
+            activities.create_link,
+            activities.delete_link,
+            activities.attach_port,
+            activities.detach_port,
+        ],
+    )
     try:
-        await worker.run()
+        await asyncio.gather(worker.run(), linux_worker.run())
     finally:
         await slice_manager.close()
 

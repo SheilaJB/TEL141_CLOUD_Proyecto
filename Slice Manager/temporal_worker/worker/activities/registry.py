@@ -1,3 +1,5 @@
+from contracts.adapter import AdapterActionInput, AdapterActionOutput
+from contracts.plan import ActionOp
 from contracts.placement import (
     PlacementReserveRequest,
     PlacementRollbackRequest,
@@ -33,9 +35,11 @@ class DeploymentActivities:
         self,
         slice_manager: SliceManagerClient,
         network_manager_url: str = "http://networkmanager:8000",
+        compute_manager_url: str = "http://computemanager:8000",
     ) -> None:
         self._slice_manager = slice_manager
         self._network_manager_url = network_manager_url.rstrip("/")
+        self._compute_manager_url = compute_manager_url.rstrip("/")
 
     @activity.defn(name=ACTIVITY_GET_PLAN)
     async def get_plan(self, deployment_id: int) -> DeploymentContext:
@@ -200,3 +204,111 @@ class DeploymentActivities:
             "networks": allocated.get("networks", []),
             "ovs_commands": ovs_data,
         }
+
+    @activity.defn(name="create_vm")
+    async def create_vm(self, request: AdapterActionInput) -> AdapterActionOutput:
+        node_id = str(request.action.target.id)
+        activity.logger.info(
+            f"Executing create_vm via Compute Manager for node {node_id}"
+        )
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            res = await client.post(
+                f"{self._compute_manager_url}/vms/{node_id}/create",
+                json={},
+            )
+            res.raise_for_status()
+            data = res.json()
+        return AdapterActionOutput(
+            action_id=request.action.id,
+            operation=ActionOp.CREATE_VM,
+            facts={"nodo_id": node_id, "vm_status": data.get("estado", "RUNNING")},
+        )
+
+    @activity.defn(name="delete_vm")
+    async def delete_vm(self, request: AdapterActionInput) -> AdapterActionOutput:
+        node_id = str(request.action.target.id)
+        activity.logger.info(
+            f"Executing delete_vm via Compute Manager for node {node_id}"
+        )
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            res = await client.delete(f"{self._compute_manager_url}/vms/{node_id}")
+            if res.status_code not in (200, 204, 404):
+                res.raise_for_status()
+        return AdapterActionOutput(
+            action_id=request.action.id,
+            operation=ActionOp.DELETE_VM,
+            facts={"nodo_id": node_id, "deleted": True},
+        )
+
+    @activity.defn(name="start_vm")
+    async def start_vm(self, request: AdapterActionInput) -> AdapterActionOutput:
+        node_id = str(request.action.target.id)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            res = await client.post(f"{self._compute_manager_url}/vms/{node_id}/start")
+            res.raise_for_status()
+        return AdapterActionOutput(
+            action_id=request.action.id,
+            operation=ActionOp.START_VM,
+            facts={"nodo_id": node_id, "started": True},
+        )
+
+    @activity.defn(name="stop_vm")
+    async def stop_vm(self, request: AdapterActionInput) -> AdapterActionOutput:
+        node_id = str(request.action.target.id)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            res = await client.post(f"{self._compute_manager_url}/vms/{node_id}/stop")
+            res.raise_for_status()
+        return AdapterActionOutput(
+            action_id=request.action.id,
+            operation=ActionOp.STOP_VM,
+            facts={"nodo_id": node_id, "stopped": True},
+        )
+
+    @activity.defn(name="resize_vm")
+    async def resize_vm(self, request: AdapterActionInput) -> AdapterActionOutput:
+        return AdapterActionOutput(
+            action_id=request.action.id,
+            operation=ActionOp.RESIZE_VM,
+            facts={},
+        )
+
+    @activity.defn(name="set_public_access")
+    async def set_public_access(self, request: AdapterActionInput) -> AdapterActionOutput:
+        return AdapterActionOutput(
+            action_id=request.action.id,
+            operation=ActionOp.SET_PUBLIC,
+            facts={"public": True},
+        )
+
+    @activity.defn(name="create_link")
+    async def create_link(self, request: AdapterActionInput) -> AdapterActionOutput:
+        return AdapterActionOutput(
+            action_id=request.action.id,
+            operation=ActionOp.CREATE_LINK,
+            facts={"created": True},
+        )
+
+    @activity.defn(name="delete_link")
+    async def delete_link(self, request: AdapterActionInput) -> AdapterActionOutput:
+        return AdapterActionOutput(
+            action_id=request.action.id,
+            operation=ActionOp.DELETE_LINK,
+            facts={"deleted": True},
+        )
+
+    @activity.defn(name="attach_port")
+    async def attach_port(self, request: AdapterActionInput) -> AdapterActionOutput:
+        return AdapterActionOutput(
+            action_id=request.action.id,
+            operation=ActionOp.ATTACH_PORT,
+            facts={"attached": True},
+        )
+
+    @activity.defn(name="detach_port")
+    async def detach_port(self, request: AdapterActionInput) -> AdapterActionOutput:
+        return AdapterActionOutput(
+            action_id=request.action.id,
+            operation=ActionOp.DETACH_PORT,
+            facts={"detached": True},
+        )
+

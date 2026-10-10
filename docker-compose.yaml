@@ -119,6 +119,7 @@ services:
       ORCHESTRATOR_TEMPORAL_NAMESPACE: ${ORCHESTRATOR_TEMPORAL_NAMESPACE:-default}
       ORCHESTRATOR_TEMPORAL_TASK_QUEUE: ${ORCHESTRATOR_TEMPORAL_TASK_QUEUE:-orchestrator-queue}
       ORCHESTRATOR_INTERNAL_SERVICE_TOKEN: ${ORCHESTRATOR_INTERNAL_SERVICE_TOKEN}
+      ORCHESTRATOR_CAPABILITIES_DIR: /app/capabilities
       APPROVAL_TIMEOUT_SECONDS: ${APPROVAL_TIMEOUT_SECONDS:-86400}
     networks: [backend]
 
@@ -142,6 +143,27 @@ services:
       ORCHESTRATOR_INTERNAL_SERVICE_TOKEN: ${ORCHESTRATOR_INTERNAL_SERVICE_TOKEN}
       ORCHESTRATOR_SIMULATED_PLACEMENT_SERVER_ID: ${ORCHESTRATOR_SIMULATED_PLACEMENT_SERVER_ID:-1}
       APPROVAL_TIMEOUT_SECONDS: ${APPROVAL_TIMEOUT_SECONDS:-86400}
+    networks: [backend]
+
+  # Worker Temporal del Network Manager
+  network-manager-worker:
+    build:
+      context: ./Network Manager
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      temporal-create-namespace:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${APP_DB_USER:-cloud_admin}:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-cloud_g3}
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${ORCHESTRATOR_TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${NETWORK_MANAGER_TEMPORAL_TASK_QUEUE:-orchestrator-queue}
+      PRIVATE_P2P_BASE: ${NETWORK_MANAGER_PRIVATE_P2P_BASE:-192.168.1.0/24}
+      PUBLIC_VID: ${NETWORK_MANAGER_PUBLIC_VID:-4000}
     networks: [backend]
 
   # Microservicio AuthAuthz (Stateful, emite RS256, rota refresh en Postgres)

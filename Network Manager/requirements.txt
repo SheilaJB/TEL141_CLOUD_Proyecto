@@ -2,3 +2,5 @@ fastapi==0.103.1
 uvicorn==0.23.2
 pydantic==2.3.0
 networkx==3.1
+asyncpg>=0.29,<1
+temporalio>=1.7,<2

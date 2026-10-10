@@ -157,7 +157,7 @@ class SliceService:
                     images=images,
                     cluster_name=context["cluster_name"],
                     supports_public_access=capabilities.get(
-                        "public_access", False
+                        "set_public_access", False
                     ),
                 )
 

@@ -351,7 +351,7 @@ class SliceLifecycleService:
                     flavors=flavors,
                     images=images,
                     cluster_name=context["cluster_name"],
-                    supports_public_access=capabilities.get("public_access", False),
+                    supports_public_access=capabilities.get("set_public_access", False),
                 )
                 if context["zone_state"] != "ACTIVE":
                     raise InvalidSpecError("availability zone is not active")

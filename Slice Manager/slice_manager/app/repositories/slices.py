@@ -94,8 +94,10 @@ class SliceRepository:
     ) -> int:
         return await connection.fetchval(
             """
-            INSERT INTO slices.slice (usuario_id, nombre, estado, zona_id)
-            VALUES ($1, $2, 'DRAFT', $3)
+            INSERT INTO slices.slice (usuario_id, nombre, estado, zona_id, cluster_id)
+            SELECT $1, $2, 'DRAFT', z.id, z.cluster_id
+            FROM slices.zona_disponibilidad AS z
+            WHERE z.id = $3
             RETURNING id
             """,
             user_id,

@@ -35,7 +35,6 @@ class ActionOp(StrEnum):
     START_VM = "START_VM"
     STOP_VM = "STOP_VM"
     RESIZE_VM = "RESIZE_VM"
-    SET_PUBLIC = "SET_PUBLIC"
     CREATE_LINK = "CREATE_LINK"
     DELETE_LINK = "DELETE_LINK"
     ATTACH_PORT = "ATTACH_PORT"
@@ -101,8 +100,21 @@ class Action(ContractModel):
     intent_id: str
     target: ActionTarget
     params: dict[str, Any] = Field(default_factory=dict)
+    frozen: bool = True
     before: Any = None
     after: Any = None
+
+    @model_validator(mode="after")
+    def validate_network_action_params(self) -> "Action":
+        if (
+            self.frozen
+            and self.op in {ActionOp.CREATE_LINK, ActionOp.ATTACH_PORT}
+            and self.params
+        ):
+            raise ValueError(
+                f"{self.op.value} parameters must be empty in the frozen plan"
+            )
+        return self
 
 
 class PlanSummary(ContractModel):
@@ -110,6 +122,7 @@ class PlanSummary(ContractModel):
     destructive: bool
     actions: int = Field(ge=0)
     resource_delta: ResourceVector
+    resource_total_after: ResourceVector
 
 
 class ReservationAllocation(ContractModel):

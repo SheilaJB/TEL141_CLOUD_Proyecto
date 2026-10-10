@@ -334,14 +334,6 @@ class DeploymentRepository:
             requester_id,
             approval_state,
         )
-        await self._insert_planned_inventory(
-            connection,
-            slice_id=slice_id,
-            version_id=version_id,
-            plan=plan,
-            flavors=flavors,
-            images=images,
-        )
         await connection.execute(
             """
             UPDATE slices.slice
@@ -367,11 +359,13 @@ class DeploymentRepository:
         *,
         slice_id: int,
         version_id: int,
+        deployment_id: int,
         plan: DeploymentPlan,
         flavors: Mapping[str, CatalogFlavor],
         images: Mapping[str, CatalogImage],
     ) -> None:
-        port_targets: list[tuple[object, object, object]] = []
+        port_targets: list[tuple[object, object, object, bool]] = []
+        public_link_id: UUID | None = None
         for action in (item for round_actions in plan.rounds for item in round_actions):
             if action.op == ActionOp.CREATE_VM:
                 vm = action.after
@@ -384,8 +378,9 @@ class DeploymentRepository:
                 await connection.execute(
                     """
                     INSERT INTO slices.slice_nodo
-                        (id, slice_id, name, defin_version_id, flavor_id, imagen_id, estado_nodo)
-                    VALUES ($1, $2, $3, $4, $5, $6, 'PENDING')
+                        (id, slice_id, name, defin_version_id, flavor_id, imagen_id,
+                         public_access, estado_nodo, deployment_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8)
                     """,
                     action.target.id,
                     slice_id,
@@ -393,34 +388,59 @@ class DeploymentRepository:
                     version_id,
                     flavor.catalog_id,
                     image.catalog_id,
+                    bool(vm.get("public", False)),
+                    deployment_id,
                 )
             elif action.op == ActionOp.CREATE_LINK:
                 link = action.after
                 if not isinstance(link, dict):
                     raise ValueError(f"CREATE_LINK action {action.id} has no link specification")
+                is_public = bool(link.get("public", False))
+                if is_public:
+                    if public_link_id is not None:
+                        raise ValueError("plan contains more than one derived public link")
+                    public_link_id = action.target.id
                 await connection.execute(
                     """
-                    INSERT INTO slices.slice_enlace (id, slice_id, name, defin_version_id)
-                    VALUES ($1, $2, $3, $4)
+                    INSERT INTO slices.slice_enlace
+                        (id, slice_id, name, public, defin_version_id, deployment_id)
+                    VALUES ($1, $2, $3, $4, $5, $6)
                     """,
                     action.target.id,
                     slice_id,
                     link["name"],
+                    is_public,
                     version_id,
+                    deployment_id,
                 )
             elif action.op == ActionOp.ATTACH_PORT:
                 if action.target.link_id is None or action.target.node_id is None:
                     raise ValueError(f"ATTACH_PORT action {action.id} has an incomplete target")
-                port_targets.append((action.target.id, action.target.link_id, action.target.node_id))
-        for port_id, link_id, node_id in port_targets:
+                port_targets.append(
+                    (
+                        action.target.id,
+                        action.target.link_id,
+                        action.target.node_id,
+                        bool(action.after.get("public", False))
+                        if isinstance(action.after, dict)
+                        else False,
+                    )
+                )
+        for port_id, link_id, node_id, is_public in port_targets:
+            if is_public and public_link_id != link_id:
+                raise ValueError("public ATTACH_PORT does not target the derived public link")
             await connection.execute(
                 """
-                INSERT INTO slices.slice_enlace_puerto (id, enlace_id, nodo_id)
-                VALUES ($1, $2, $3)
+                INSERT INTO slices.slice_enlace_puerto
+                    (id, enlace_id, nodo_id, public, defin_version_id, deployment_id)
+                VALUES ($1, $2, $3, $4, $5, $6)
                 """,
                 port_id,
                 link_id,
                 node_id,
+                is_public,
+                version_id,
+                deployment_id,
             )
 
     async def get_deployment_context(
@@ -458,9 +478,12 @@ class DeploymentRepository:
     ) -> None:
         row = await connection.fetchrow(
             """
-            SELECT d.estado, a.estado AS approval_state, d.target_version_id
+            SELECT d.estado, a.estado AS approval_state, d.target_version_id,
+                   d.slice_id, s.zona_id, z.cluster_id, d.plan
             FROM slices.deployment AS d
             JOIN slices.solicitud_aprobacion AS a ON a.deployment_id = d.id
+            JOIN slices.slice AS s ON s.id = d.slice_id
+            JOIN slices.zona_disponibilidad AS z ON z.id = s.zona_id
             WHERE d.id = $1
             FOR UPDATE OF d
             """,
@@ -485,6 +508,17 @@ class DeploymentRepository:
             WHERE id = $1 AND estado_version = 'APPROVAL_PENDING'
             """,
             row["target_version_id"],
+        )
+        plan = DeploymentPlan.model_validate(row["plan"])
+        flavors, images = await self.load_catalog(connection, row["cluster_id"])
+        await self._insert_planned_inventory(
+            connection,
+            slice_id=row["slice_id"],
+            version_id=row["target_version_id"],
+            deployment_id=deployment_id,
+            plan=plan,
+            flavors=flavors,
+            images=images,
         )
 
     async def reserve_deployment_placement(

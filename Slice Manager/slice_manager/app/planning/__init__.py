@@ -5,6 +5,7 @@ from slice_manager.app.planning.planner import (
     CatalogImage,
     CatalogFlavor,
     build_initial_deploy_plan,
+    calculate_reservation_plan,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "CatalogImage",
     "InvalidSpecError",
     "build_initial_deploy_plan",
+    "calculate_reservation_plan",
 ]

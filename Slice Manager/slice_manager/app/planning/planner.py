@@ -17,6 +17,8 @@ from contracts.plan import (
     PlanType,
     ReservationAllocation,
     ReservationPlan,
+    ReservationRelease,
+    ReservationResize,
     ResourceVector,
     TargetKind,
 )
@@ -43,6 +45,84 @@ class CatalogImage:
     reference: str
     catalog_id: int
     cluster_compatible: str | None
+
+
+def calculate_reservation_plan(
+    intents: list[Intent],
+    flavors: Mapping[str, CatalogFlavor],
+) -> tuple[ReservationPlan, ResourceVector]:
+    """Calculate reservations and capacity demand without side effects."""
+    allocate: list[ReservationAllocation] = []
+    resize: list[ReservationResize] = []
+    release: list[ReservationRelease] = []
+    demand = {"vcpu": 0, "ram_mb": 0, "disk_mb": 0}
+
+    def flavor_resources(value: object, path: str) -> ResourceVector:
+        if not isinstance(value, str) or value not in flavors:
+            raise InvalidSpecError(f"unknown or inactive flavor {value!r}", path=path)
+        return flavors[value].resources()
+
+    for intent in intents:
+        if intent.target.table != "vms":
+            continue
+        changes = {change.field: change for change in intent.changes}
+        flavor_change = changes.get("flavor_ref")
+        before = (
+            flavor_resources(
+                flavor_change.before,
+                f"intents[{intent.id}].changes[flavor_ref].before",
+            )
+            if flavor_change is not None and flavor_change.before is not None
+            else None
+        )
+        after = (
+            flavor_resources(
+                flavor_change.after,
+                f"intents[{intent.id}].changes[flavor_ref].after",
+            )
+            if flavor_change is not None and flavor_change.after is not None
+            else None
+        )
+
+        if intent.kind == IntentKind.CREATE:
+            if after is None:
+                raise InvalidSpecError(
+                    f"create intent {intent.id!r} has no target flavor",
+                    path=f"intents[{intent.id}]",
+                )
+            allocate.append(ReservationAllocation(node_id=intent.target.id, resources=after))
+            for key, value in after.model_dump().items():
+                demand[key] += value
+        elif intent.kind == IntentKind.REMOVE:
+            if before is None:
+                raise InvalidSpecError(
+                    f"remove intent {intent.id!r} has no previous flavor",
+                    path=f"intents[{intent.id}]",
+                )
+            release.append(ReservationRelease(node_id=intent.target.id))
+        elif intent.kind in {IntentKind.MODIFY, IntentKind.RECREATE}:
+            if before is None or after is None:
+                raise InvalidSpecError(
+                    f"{intent.kind.value.lower()} intent {intent.id!r} must define before and after flavors",
+                    path=f"intents[{intent.id}]",
+                )
+            resize.append(
+                ReservationResize(
+                    node_id=intent.target.id,
+                    before=before,
+                    after=after,
+                )
+            )
+            before_values = before.model_dump()
+            after_values = after.model_dump()
+            for key in before_values:
+                difference = after_values[key] - before_values[key]
+                if difference > 0:
+                    demand[key] += difference
+
+    return ReservationPlan(allocate=allocate, resize=resize, release=release), ResourceVector(
+        **demand
+    )
 
 
 def build_initial_deploy_plan(
@@ -102,8 +182,6 @@ def _build_plan(
             )
 
     resolved: dict[str, tuple[CatalogFlavor, CatalogImage, UUID]] = {}
-    allocated: list[ReservationAllocation] = []
-    resource_delta = {"vcpu": 0, "ram_mb": 0, "disk_mb": 0}
     for vm in sorted(definition.vms, key=lambda item: item.name):
         flavor = flavors.get(vm.flavor)
         if flavor is None or flavor.name != vm.flavor:
@@ -134,11 +212,6 @@ def _build_plan(
 
         node_id = identities.entity_id("vm", vm.name)
         resolved[vm.name] = (flavor, image, node_id)
-        resources = flavor.resources()
-        allocated.append(ReservationAllocation(node_id=node_id, resources=resources))
-        resource_delta["vcpu"] += resources.vcpu
-        resource_delta["ram_mb"] += resources.ram_mb
-        resource_delta["disk_mb"] += resources.disk_mb
 
     connected_vms = {
         endpoint for link in definition.links for endpoint in link.endpoints
@@ -198,7 +271,7 @@ def _build_plan(
                         "ram_mb": flavor.ram_mb,
                         "disk_mb": flavor.disk_mb,
                     },
-                    "public": False,
+                    "public": vm.public,
                 },
                 after={
                     "name": vm.name,
@@ -208,23 +281,6 @@ def _build_plan(
                 },
             )
         )
-        if vm.public:
-            public_action_id = f"a{next_action}"
-            next_action += 1
-            append_action(
-                Action(
-                    id=public_action_id,
-                    op=ActionOp.SET_PUBLIC,
-                    executor=Executor.ADAPTER,
-                    intent_id=intent_id,
-                    target=ActionTarget(kind=TargetKind.VM, id=node_id),
-                    params={"public": True},
-                    before={"public": False},
-                    after={"public": True},
-                ),
-                after={create_action_id},
-            )
-
     link_ids: dict[str, UUID] = {}
     for link in sorted(definition.links, key=lambda item: item.name):
         link_id = identities.entity_id("link", link.name)
@@ -260,7 +316,7 @@ def _build_plan(
                 executor=Executor.ADAPTER,
                 intent_id=intent_id,
                 target=ActionTarget(kind=TargetKind.LINK, id=link_id),
-                params={"name": link.name},
+                params={},
                 after={
                     "name": link.name,
                     "endpoints": sorted(
@@ -286,10 +342,81 @@ def _build_plan(
                         link_id=link_id,
                         node_id=node_id,
                     ),
-                    params={"link_name": link.name, "vm_name": endpoint},
+                    params={},
                     after={"link_id": str(link_id), "node_id": str(node_id)},
                 ),
                 after={link_create_actions[link.name], vm_create_actions[endpoint]},
+            )
+
+    public_vms = [
+        vm
+        for vm in sorted(definition.vms, key=lambda item: item.name)
+        if vm.public
+    ]
+    if public_vms:
+        public_link_id = identities.entity_id("link", "public")
+        public_intent_id = "i_pub"
+        public_node_ids = [resolved[vm.name][2] for vm in public_vms]
+        intents.append(
+            Intent(
+                id=public_intent_id,
+                target=IntentTarget(table="links", id=public_link_id),
+                kind=IntentKind.CREATE,
+                strategy="create derived public link and attach public ports",
+                disruption=Disruption.N0,
+                changes=[
+                    {"field": "name", "before": None, "after": "public"},
+                    {"field": "public", "before": None, "after": True},
+                    {
+                        "field": "endpoints",
+                        "before": None,
+                        "after": [str(node_id) for node_id in public_node_ids],
+                    },
+                ],
+            )
+        )
+        public_create_action_id = f"a{next_action}"
+        next_action += 1
+        append_action(
+            Action(
+                id=public_create_action_id,
+                op=ActionOp.CREATE_LINK,
+                executor=Executor.ADAPTER,
+                intent_id=public_intent_id,
+                target=ActionTarget(kind=TargetKind.LINK, id=public_link_id),
+                params={},
+                after={
+                    "name": "public",
+                    "public": True,
+                    "endpoints": [str(node_id) for node_id in public_node_ids],
+                },
+            )
+        )
+        for vm in public_vms:
+            node_id = resolved[vm.name][2]
+            public_port_id = identities.entity_id("port", "public", vm.name)
+            public_attach_action_id = f"a{next_action}"
+            next_action += 1
+            append_action(
+                Action(
+                    id=public_attach_action_id,
+                    op=ActionOp.ATTACH_PORT,
+                    executor=Executor.ADAPTER,
+                    intent_id=public_intent_id,
+                    target=ActionTarget(
+                        kind=TargetKind.PORT,
+                        id=public_port_id,
+                        link_id=public_link_id,
+                        node_id=node_id,
+                    ),
+                    params={},
+                    after={
+                        "link_id": str(public_link_id),
+                        "node_id": str(node_id),
+                        "public": True,
+                    },
+                ),
+                after={public_create_action_id, vm_create_actions[vm.name]},
             )
 
     ordered_rounds: list[list[Action]] = []
@@ -303,16 +430,21 @@ def _build_plan(
         ordered_rounds.append([action_by_id[action_id] for action_id in ready])
         sorter.done(*ready)
 
+    reservation, resource_delta = calculate_reservation_plan(
+        intents,
+        flavors,
+    )
     return DeploymentPlan(
         type=PlanType.DEPLOY,
         summary=PlanSummary(
             disruption_max=Disruption.N0,
             destructive=False,
             actions=len(actions),
-            resource_delta=ResourceVector(**resource_delta),
+            resource_delta=resource_delta,
+            resource_total_after=resource_delta,
         ),
         intents=intents,
-        reservation=ReservationPlan(allocate=allocated),
+        reservation=reservation,
         point_of_no_return_round=None,
         rounds=ordered_rounds,
     )

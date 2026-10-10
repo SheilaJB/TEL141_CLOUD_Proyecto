@@ -33,6 +33,25 @@ class PlacementReserveResponse(ContractModel):
         return self
 
 
+class PlacementResult(ContractModel):
+    deployment_id: int = Field(gt=0)
+    status: PlacementStatus = PlacementStatus.RESERVED
+    server_by_node: dict[UUID, int] = Field(default_factory=dict)
+
+    @classmethod
+    def from_reserve_response(
+        cls, response: PlacementReserveResponse
+    ) -> "PlacementResult":
+        return cls(
+            deployment_id=response.deployment_id,
+            status=response.status,
+            server_by_node={
+                allocation.node_id: allocation.server_id
+                for allocation in response.allocations
+            },
+        )
+
+
 class PlacementRollbackRequest(ContractModel):
     deployment_id: int = Field(gt=0)
 

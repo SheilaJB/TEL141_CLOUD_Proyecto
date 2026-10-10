@@ -57,13 +57,37 @@ Content-Type: application/json
     "schema_version": 1,
     "vms": [
       {
-        "name": "vm-a-{{runId}}",
+        "name": "vm1-{{runId}}",
+        "flavor": "small-v1",
+        "image": "Ubuntu",
+        "public": true
+      },
+      {
+        "name": "vm2-{{runId}}",
         "flavor": "micro-v1",
         "image": "Cirros",
         "public": false
       },
       {
-        "name": "vm-b-{{runId}}",
+        "name": "vm3-{{runId}}",
+        "flavor": "small-v1",
+        "image": "Ubuntu",
+        "public": true
+      },
+      {
+        "name": "vm4-{{runId}}",
+        "flavor": "small-v1",
+        "image": "Ubuntu",
+        "public": false
+      },
+      {
+        "name": "vm5-{{runId}}",
+        "flavor": "small-v1",
+        "image": "Ubuntu",
+        "public": false
+      },
+      {
+        "name": "vm6-{{runId}}",
         "flavor": "micro-v1",
         "image": "Cirros",
         "public": false
@@ -71,8 +95,28 @@ Content-Type: application/json
     ],
     "links": [
       {
-        "name": "lan-{{runId}}",
-        "endpoints": ["vm-a-{{runId}}", "vm-b-{{runId}}"]
+        "name": "l-vm6-vm5-{{runId}}",
+        "endpoints": ["vm6-{{runId}}", "vm5-{{runId}}"]
+      },
+      {
+        "name": "l-vm5-vm4-{{runId}}",
+        "endpoints": ["vm5-{{runId}}", "vm4-{{runId}}"]
+      },
+      {
+        "name": "l-vm4-vm1-{{runId}}",
+        "endpoints": ["vm4-{{runId}}", "vm1-{{runId}}"]
+      },
+      {
+        "name": "l-vm4-vm3-{{runId}}",
+        "endpoints": ["vm4-{{runId}}", "vm3-{{runId}}"]
+      },
+      {
+        "name": "l-vm1-vm2-{{runId}}",
+        "endpoints": ["vm1-{{runId}}", "vm2-{{runId}}"]
+      },
+      {
+        "name": "l-vm3-vm2-{{runId}}",
+        "endpoints": ["vm3-{{runId}}", "vm2-{{runId}}"]
       }
     ]
   }

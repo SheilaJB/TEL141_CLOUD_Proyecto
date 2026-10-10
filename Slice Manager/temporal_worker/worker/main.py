@@ -48,6 +48,7 @@ async def run_worker() -> None:
             activities.finish_deployment,
             activities.reserve,
             activities.rollback_reservation,
+            activities.build_adapter_actions,
         ],
     )
     try:

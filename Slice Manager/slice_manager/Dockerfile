@@ -21,6 +21,7 @@ RUN uv pip install -r slice_manager/pyproject.toml
 
 # 3) Código
 COPY slice_manager/ ./slice_manager/
+COPY capabilities/ ./capabilities/
 
 RUN useradd --system --uid 10001 appuser && chown -R appuser /app
 USER appuser

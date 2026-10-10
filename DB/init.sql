@@ -175,7 +175,8 @@ CREATE TABLE slices.image (
 
 INSERT INTO slices.image (nombre, cluster_compatible, ruta_referencia) VALUES
     ('Cirros', 1, '/images/cirros.qcow2'),
-    ('Linux Alpine', 1, '/images/alpine.qcow2');
+    ('Linux Alpine', 1, '/images/alpine.qcow2'),
+    ('Ubuntu', 1, '/images/ubuntu.qcow2');
 
 CREATE TABLE slices.flavor (
     id                  SERIAL PRIMARY KEY,
@@ -212,15 +213,20 @@ CREATE TABLE slices.slice (
     estado              TEXT NOT NULL DEFAULT 'DRAFT' CHECK (
                             estado IN ('DRAFT', 'UPDATING', 'RUNNING', 'STOPPED', 'FAILED', 'ELIMINATED')
                         ),
-    zona_id          INTEGER REFERENCES slices.zona_disponibilidad(id),
-    version_activa_id   INTEGER,   -- FK tras crear slice_version, una por slice
+    zona_id             INTEGER NOT NULL REFERENCES slices.zona_disponibilidad(id),
+    cluster_id          INTEGER NOT NULL REFERENCES slices.cluster(id),
+    version_activa_id   INTEGER DEFAULT NULL,   -- FK tras crear slice_version, una por slice
+    vlan_stag           INTEGER CHECK (vlan_stag IS NULL OR vlan_stag BETWEEN 100 AND 999),
+    red_deployment_id   INTEGER,
     fecha_creacion      TIMESTAMP NOT NULL DEFAULT now(),
     fecha_modificacion  TIMESTAMP NOT NULL DEFAULT now()
 );
 
-INSERT INTO slices.slice (usuario_id, nombre, estado, zona_id, version_activa_id) VALUES
-    (1, 'Slice de prueba 1', 'DRAFT', 1, NULL),
-    (2, 'Slice de prueba 2', 'DRAFT', 2, NULL);
+INSERT INTO slices.slice
+    (usuario_id, nombre, estado, zona_id, cluster_id, version_activa_id)
+VALUES
+    (1, 'Slice de prueba 1', 'DRAFT', 1, 1, NULL),
+    (2, 'Slice de prueba 2', 'DRAFT', 2, 1, NULL);
 
 CREATE TABLE slices.slice_version (
     id                  SERIAL PRIMARY KEY,
@@ -256,7 +262,11 @@ CREATE TABLE slices.slice_nodo (
     imagen_id           INTEGER NOT NULL REFERENCES slices.image(id),
     estado_nodo         TEXT NOT NULL DEFAULT 'PENDING' CHECK (
                             estado_nodo IN ('PENDING', 'RUNNING', 'STOPPED', 'FAILED', 'DELETED')
-                        )
+                        ),
+    public_access       BOOLEAN NOT NULL DEFAULT FALSE,
+    puerto_vnc          INTEGER DEFAULT NULL,
+    pid                 INTEGER DEFAULT NULL,
+    deployment_id       INTEGER
 );
 
 INSERT INTO slices.slice_nodo (slice_id, defin_version_id, name, flavor_id, imagen_id, estado_nodo) VALUES
@@ -267,41 +277,83 @@ INSERT INTO slices.slice_nodo (slice_id, defin_version_id, name, flavor_id, imag
     (2, 2, 'Nodo 2B', 2, 1, 'PENDING'),
     (2, 2, 'Nodo 2C', 1, 1, 'PENDING');
 
--- CREATE TABLE slices.slice_enlace (
---     id                  SERIAL PRIMARY KEY,
---     slice_id            INTEGER NOT NULL REFERENCES slices.slice(id) ON DELETE CASCADE,
---     name                TEXT NOT NULL,
---     defin_version_id    INTEGER NOT NULL REFERENCES slices.slice_version(id) ON DELETE CASCADE,
---     nodo_origen_id      INTEGER NOT NULL REFERENCES slices.slice_nodo(id),
---     nodo_destino_id     INTEGER NOT NULL REFERENCES slices.slice_nodo(id),
---     estado              TEXT NOT NULL DEFAULT 'PENDING' CHECK (
---                             estado IN ('PENDING', 'CREATED', 'FAILED', 'DELETED')
---                         ),
---     CHECK (nodo_origen_id != nodo_destino_id)
--- );
+
 CREATE TABLE slices.slice_enlace (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slice_id            INTEGER NOT NULL REFERENCES slices.slice(id) ON DELETE CASCADE,
     name                TEXT NOT NULL,
-    defin_version_id    INTEGER NOT NULL REFERENCES slices.slice_version(id)
+    public              BOOLEAN NOT NULL DEFAULT FALSE,
+    defin_version_id    INTEGER NOT NULL REFERENCES slices.slice_version(id),
+    cidr                CIDR,
+    vlan_ctag           INTEGER,
+    estado              TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+                            estado IN ('PENDING', 'CREATED', 'DELETED', 'FAILED')
+                        ),
+    deployment_id       INTEGER,
+    CONSTRAINT chk_private_link_network CHECK (
+        public
+        OR (cidr IS NULL AND vlan_ctag IS NULL)
+        OR (
+            cidr IS NOT NULL
+            AND masklen(cidr) BETWEEN 24 AND 30
+            AND vlan_ctag BETWEEN 2 AND 1999
+        )
+    ),
+    CONSTRAINT chk_public_link_network CHECK (
+        NOT public OR (cidr IS NULL AND vlan_ctag IS NULL)
+    )
 );
+
+CREATE UNIQUE INDEX uq_enlace_publico_slice
+    ON slices.slice_enlace (slice_id)
+    WHERE public AND estado <> 'DELETED';
+CREATE UNIQUE INDEX uq_enlace_vlan_ctag
+    ON slices.slice_enlace (slice_id, vlan_ctag)
+    WHERE vlan_ctag IS NOT NULL AND estado <> 'DELETED';
+CREATE UNIQUE INDEX uq_enlace_cidr_slice
+    ON slices.slice_enlace (slice_id, cidr)
+    WHERE cidr IS NOT NULL AND estado <> 'DELETED';
+
 CREATE TABLE slices.slice_enlace_puerto (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     enlace_id           UUID NOT NULL REFERENCES slices.slice_enlace(id) ON DELETE CASCADE,
     nodo_id             UUID NOT NULL REFERENCES slices.slice_nodo(id),
-    name                TEXT,
     public              BOOLEAN NOT NULL DEFAULT FALSE,
-    -- facts que escribe el adaptador:
+    defin_version_id    INTEGER NOT NULL REFERENCES slices.slice_version(id),
+    nic_index           SMALLINT CHECK (nic_index >= 0),
     mac                 MACADDR,
     ip                  INET,
-    vlan_tag            INTEGER,
-    ns                  TEXT,
-    UNIQUE (enlace_id, nodo_id)
+    estado              TEXT NOT NULL DEFAULT 'PENDING' CHECK (
+                            estado IN ('PENDING', 'ATTACHED', 'FAILED', 'DELETED')
+                        ),
+    deployment_id       INTEGER
 );
 
+CREATE UNIQUE INDEX uq_puerto_enlace_nodo
+    ON slices.slice_enlace_puerto (enlace_id, nodo_id)
+    WHERE estado <> 'DELETED';
+CREATE UNIQUE INDEX uq_puerto_publico_nodo
+    ON slices.slice_enlace_puerto (nodo_id)
+    WHERE public AND estado <> 'DELETED';
+CREATE UNIQUE INDEX uq_puerto_nic_nodo
+    ON slices.slice_enlace_puerto (nodo_id, nic_index)
+    WHERE nic_index IS NOT NULL AND estado <> 'DELETED';
+CREATE UNIQUE INDEX uq_puerto_ip_privada
+    ON slices.slice_enlace_puerto (enlace_id, ip)
+    WHERE NOT public AND ip IS NOT NULL AND estado <> 'DELETED';
+CREATE UNIQUE INDEX uq_puerto_ip_publica
+    ON slices.slice_enlace_puerto (ip)
+    WHERE public AND ip IS NOT NULL AND estado <> 'DELETED';
+CREATE UNIQUE INDEX uq_puerto_mac
+    ON slices.slice_enlace_puerto (mac)
+    WHERE mac IS NOT NULL AND estado <> 'DELETED';
 
 CREATE INDEX idx_slice_nodos_version ON slices.slice_nodo(defin_version_id);
 CREATE INDEX idx_slice_enlaces_version ON slices.slice_enlace(defin_version_id);
+CREATE INDEX idx_enlace_puertos_version ON slices.slice_enlace_puerto(defin_version_id);
+CREATE UNIQUE INDEX uq_slice_vlan_stag
+    ON slices.slice (cluster_id, vlan_stag)
+    WHERE vlan_stag IS NOT NULL AND estado <> 'ELIMINATED';
 
 
 -- slices — despliegue (workflows de cambios de slice)
@@ -322,6 +374,22 @@ CREATE TABLE slices.deployment (             -- una fila por intento. ejem. actu
 
 CREATE UNIQUE INDEX uq_deployment_slice_activo ON slices.deployment (slice_id, workflow_id);
 CREATE UNIQUE INDEX uq_deployment_slice_version ON slices.deployment (slice_id) WHERE estado IN ('PENDING', 'IN_PROGRESS');
+
+ALTER TABLE slices.slice
+    ADD CONSTRAINT fk_slice_red_deployment
+    FOREIGN KEY (red_deployment_id) REFERENCES slices.deployment(id);
+
+ALTER TABLE slices.slice_nodo
+    ADD CONSTRAINT fk_slice_nodo_deployment
+    FOREIGN KEY (deployment_id) REFERENCES slices.deployment(id);
+
+ALTER TABLE slices.slice_enlace
+    ADD CONSTRAINT fk_slice_enlace_deployment
+    FOREIGN KEY (deployment_id) REFERENCES slices.deployment(id);
+
+ALTER TABLE slices.slice_enlace_puerto
+    ADD CONSTRAINT fk_slice_enlace_puerto_deployment
+    FOREIGN KEY (deployment_id) REFERENCES slices.deployment(id);
 
 
 -- slices — reservas (libro de VM Placement)

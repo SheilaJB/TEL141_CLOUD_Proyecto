@@ -1,11 +1,13 @@
 import asyncio
 from datetime import timedelta
 from typing import Any
+from uuid import UUID
 
 from contracts.adapter import AdapterActionInput, AdapterActionOutput
 from contracts.errors import ErrorCode, ErrorResponse
 from contracts.plan import Action, ActionOp, Executor
-from contracts.placement import PlacementReserveResponse, PlacementStatus
+from contracts.network import NetworkAllocation
+from contracts.placement import PlacementReserveResponse, PlacementStatus, PlacementResult
 from contracts.queues import (
     ACTIVITY_FINISH_DEPLOYMENT,
     ACTIVITY_GET_APPROVAL_STATE,
@@ -14,6 +16,9 @@ from contracts.queues import (
     ACTIVITY_RESERVE_PLACEMENT,
     ACTIVITY_ROLLBACK_PLACEMENT,
     ACTIVITY_START_DEPLOYMENT,
+    ACTIVITY_NETWORK_ALLOCATE,
+    ACTIVITY_NETWORK_ROLLBACK,
+    ACTIVITY_BUILD_ADAPTER_ACTIONS,
     ORCHESTRATOR_QUEUE,
 )
 from contracts.registry import (
@@ -88,7 +93,6 @@ ADAPTER_ACTIVITIES = {
     ActionOp.START_VM: "start_vm",
     ActionOp.STOP_VM: "stop_vm",
     ActionOp.RESIZE_VM: "resize_vm",
-    ActionOp.SET_PUBLIC: "set_public_access",
     ActionOp.CREATE_LINK: "create_link",
     ActionOp.DELETE_LINK: "delete_link",
     ActionOp.ATTACH_PORT: "attach_port",
@@ -98,7 +102,6 @@ INVERSE_OPERATIONS = {
     ActionOp.CREATE_VM: ActionOp.DELETE_VM,
     ActionOp.CREATE_LINK: ActionOp.DELETE_LINK,
     ActionOp.ATTACH_PORT: ActionOp.DETACH_PORT,
-    ActionOp.SET_PUBLIC: ActionOp.SET_PUBLIC,
     ActionOp.START_VM: ActionOp.STOP_VM,
     ActionOp.STOP_VM: ActionOp.START_VM,
 }
@@ -129,7 +132,10 @@ class DeployWorkflow:
         applied: list[Action] = []
         reservation_attempted = False
         context: DeploymentContext | None = None
-        allocation_by_node: dict[str, int] = {}
+        allocation_by_node: dict[UUID, int] = {}
+        network_allocation: NetworkAllocation | None = None
+        prepared_actions: dict[str, AdapterActionInput] = {}
+        reversibility_reached = False
 
         try:
             approval = await self._get_approval_state(deployment_id)
@@ -185,9 +191,10 @@ class DeployWorkflow:
                 result_type=DeploymentContext,
                 task_queue=ORCHESTRATOR_QUEUE,
             )
+            reserve_task = None
             if context.plan.reservation.allocate:
                 reservation_attempted = True
-                reservation = await self._execute_activity(
+                reserve_task = self._execute_activity(
                     ACTIVITY_RESERVE_PLACEMENT,
                     deployment_id,
                     result_type=PlacementReserveResponse,
@@ -195,6 +202,22 @@ class DeployWorkflow:
                     start_to_close_timeout=PLACEMENT_ACTIVITY_TIMEOUT,
                     retry_policy=PLACEMENT_RETRY_POLICY,
                 )
+            network_task = self._execute_activity(
+                ACTIVITY_NETWORK_ALLOCATE,
+                deployment_id,
+                result_type=NetworkAllocation,
+                task_queue=ORCHESTRATOR_QUEUE,
+                start_to_close_timeout=REGISTRY_ACTIVITY_TIMEOUT,
+                retry_policy=REGISTRY_RETRY_POLICY,
+            )
+            if reserve_task is None:
+                reservation = None
+                network_allocation = await network_task
+            else:
+                reservation, network_allocation = await asyncio.gather(
+                    reserve_task, network_task
+                )
+            if reservation is not None:
                 if (
                     reservation.deployment_id != deployment_id
                     or reservation.status != PlacementStatus.RESERVED
@@ -204,12 +227,10 @@ class DeployWorkflow:
                         type=ErrorCode.CONFLICT.value,
                         non_retryable=True,
                     )
-                allocation_by_node = {
-                    str(allocation.node_id): allocation.server_id
-                    for allocation in reservation.allocations
-                }
+                placement_result = PlacementResult.from_reserve_response(reservation)
+                allocation_by_node = placement_result.server_by_node
                 required_nodes = {
-                    str(item.node_id) for item in context.plan.reservation.allocate
+                    item.node_id for item in context.plan.reservation.allocate
                 }
                 if (
                     required_nodes != set(allocation_by_node)
@@ -220,6 +241,29 @@ class DeployWorkflow:
                         type=ErrorCode.CONFLICT.value,
                         non_retryable=True,
                     )
+            else:
+                placement_result = PlacementResult(
+                    deployment_id=deployment_id,
+                    server_by_node={},
+                )
+            if network_allocation is None:
+                raise ApplicationError(
+                    "network allocation was not returned",
+                    type=ErrorCode.CONFLICT.value,
+                    non_retryable=True,
+                )
+            prepared = await self._execute_activity(
+                ACTIVITY_BUILD_ADAPTER_ACTIONS,
+                deployment_id,
+                context.plan,
+                placement_result,
+                network_allocation,
+                result_type=list[AdapterActionInput],
+                task_queue=ORCHESTRATOR_QUEUE,
+                start_to_close_timeout=REGISTRY_ACTIVITY_TIMEOUT,
+                retry_policy=REGISTRY_RETRY_POLICY,
+            )
+            prepared_actions = {item.action.id: item for item in prepared}
 
             for round_num, actions in enumerate(context.plan.rounds, start=1):
                 facts, compensation_candidates, failures = await self._execute_round(
@@ -227,6 +271,7 @@ class DeployWorkflow:
                     actions,
                     round_num,
                     allocation_by_node,
+                    prepared_actions,
                 )
                 applied.extend(compensation_candidates)
                 record_result = await self._execute_activity(
@@ -243,6 +288,11 @@ class DeployWorkflow:
                     )
                 if failures:
                     raise DeploymentStepFailed(failures[0])
+                if (
+                    context.plan.point_of_no_return_round is not None
+                    and round_num >= context.plan.point_of_no_return_round
+                ):
+                    reversibility_reached = True
 
             await self._finish(deployment_id, DeploymentOutcome.COMPLETED)
             return DeploymentOutcome.COMPLETED.value
@@ -252,12 +302,20 @@ class DeployWorkflow:
                 if isinstance(exc, DeploymentStepFailed)
                 else self._error_from_exception(exc)
             )
+            if reversibility_reached:
+                await self._finish(
+                    deployment_id,
+                    DeploymentOutcome.FAILED,
+                    failure,
+                )
+                return DeploymentOutcome.FAILED.value
             compensation_error = await self._compensate(
                 context=context,
                 deployment_id=deployment_id,
                 applied=applied,
                 allocation_by_node=allocation_by_node,
                 reservation_attempted=reservation_attempted,
+                prepared_actions=prepared_actions,
             )
             if compensation_error is not None:
                 await self._finish(
@@ -286,7 +344,8 @@ class DeployWorkflow:
         context: DeploymentContext,
         actions: list[Action],
         round_num: int,
-        allocation_by_node: dict[str, int],
+        allocation_by_node: dict[UUID, int],
+        prepared_actions: dict[str, AdapterActionInput],
     ) -> tuple[RoundFacts, list[Action], list[ErrorResponse]]:
         results = await asyncio.gather(
             *[
@@ -294,6 +353,7 @@ class DeployWorkflow:
                     context,
                     action,
                     allocation_by_node,
+                    prepared_action=prepared_actions.get(action.id),
                 )
                 for action in actions
             ],
@@ -324,13 +384,18 @@ class DeployWorkflow:
                         facts=result.facts,
                     )
                 )
+        successful_actions = [
+            prepared_actions[action.id].action
+            for action, result in zip(actions, results, strict=True)
+            if not isinstance(result, Exception)
+        ]
         return (
             RoundFacts(
                 event_id=f"{context.deployment_id}:r{round_num}",
                 round_num=round_num,
                 actions=facts,
             ),
-            actions,
+            successful_actions,
             failures,
         )
 
@@ -338,8 +403,9 @@ class DeployWorkflow:
         self,
         context: DeploymentContext,
         action: Action,
-        allocation_by_node: dict[str, int],
+        allocation_by_node: dict[UUID, int],
         *,
+        prepared_action: AdapterActionInput | None = None,
         compensating: bool = False,
     ) -> AdapterActionOutput:
         if action.executor != Executor.ADAPTER:
@@ -348,12 +414,22 @@ class DeployWorkflow:
                 type=ErrorCode.CONFLICT.value,
                 non_retryable=True,
             )
+        if prepared_action is not None:
+            action = prepared_action.action
         server_id = None
         if action.op == ActionOp.CREATE_VM:
-            server_id = allocation_by_node.get(str(action.target.id))
+            server_id = allocation_by_node.get(action.target.id)
             if server_id is None:
                 raise ApplicationError(
                     f"No Placement allocation exists for node {action.target.id}",
+                    type=ErrorCode.CONFLICT.value,
+                    non_retryable=True,
+                )
+        elif action.op == ActionOp.ATTACH_PORT:
+            server_id = allocation_by_node.get(action.target.node_id)
+            if server_id is None:
+                raise ApplicationError(
+                    f"No Placement allocation exists for node {action.target.node_id}",
                     type=ErrorCode.CONFLICT.value,
                     non_retryable=True,
                 )
@@ -396,8 +472,9 @@ class DeployWorkflow:
         context: DeploymentContext | None,
         deployment_id: int,
         applied: list[Action],
-        allocation_by_node: dict[str, int],
+        allocation_by_node: dict[UUID, int],
         reservation_attempted: bool,
+        prepared_actions: dict[str, AdapterActionInput],
     ) -> ErrorResponse | None:
         compensation_error: ErrorResponse | None = None
         if context is not None:
@@ -417,10 +494,23 @@ class DeployWorkflow:
                         inverse,
                         allocation_by_node,
                         compensating=True,
+                        prepared_action=prepared_actions.get(action.id),
                     )
                 except (ActivityError, ApplicationError) as exc:
                     if compensation_error is None:
                         compensation_error = self._error_from_exception(exc)
+        if context is not None:
+            try:
+                await self._execute_activity(
+                    ACTIVITY_NETWORK_ROLLBACK,
+                    deployment_id,
+                    task_queue=ORCHESTRATOR_QUEUE,
+                    start_to_close_timeout=REGISTRY_ACTIVITY_TIMEOUT,
+                    retry_policy=COMPENSATION_RETRY_POLICY,
+                )
+            except (ActivityError, ApplicationError) as exc:
+                if compensation_error is None:
+                    compensation_error = self._error_from_exception(exc)
         if reservation_attempted:
             try:
                 await self._execute_activity(
@@ -441,9 +531,6 @@ class DeployWorkflow:
             return None
         inverse_params: dict[str, Any] = action.params
         inverse_after = action.before
-        if action.op == ActionOp.SET_PUBLIC:
-            inverse_params = {"public": False}
-            inverse_after = {"public": False}
         return action.model_copy(
             update={
                 "op": inverse_op,

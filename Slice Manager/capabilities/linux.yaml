@@ -1,6 +1,6 @@
 supports:
   # --- Deploy ---
-  set_public_access: false        # NAT / port-forward
+  set_public_access: true        # NAT / port-forward
   apply_security_rules: false    # [OPEN] R5
 
   # --- Update / Power (placeholder) ---

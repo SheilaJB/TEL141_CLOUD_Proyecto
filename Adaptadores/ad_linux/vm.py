@@ -52,7 +52,7 @@ def create_vm(request: AdapterActionInput) -> dict:
     if not base_ref:
         raise NonRetryableError("BASE_MISSING")
     base = str(config.STORAGE_ROOT / "base" / str(base_ref))
-    overlay = str(config.STORAGE_ROOT / "overlays" / f"{vm_id}.qcow2")
+    overlay = str(config.STORAGE_ROOT / "overlay" / f"{vm_id}.qcow2")
     seed = str(config.STORAGE_ROOT / "seeds" / f"{vm_id}.iso")
     if not _exists(target.management_ip, base):
         raise NonRetryableError("BASE_MISSING")

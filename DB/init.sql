@@ -189,8 +189,8 @@ CREATE TABLE slices.flavor (
 );
 
 INSERT INTO slices.flavor (name, descripcion, vcpu, vram_mb, vdisk_mb) VALUES
-    ('verde-ex1', 'Verde: ex1', 1, 500, 2200),
-    ('rojo-ex1', 'Rojo: ex1', 1, 500, 1000),
+    ('verde-ex1', 'Verde: ex1', 1, 500, 2800),
+    ('rojo-ex1', 'Rojo: ex1', 1, 500, 1500),
     ('micro-v1', 'Micro: 1 vCPU, 256 MB RAM, 1 GB disco', 1, 256, 1000),
     ('small-v1', 'Pequeño: 1 vCPU, 512 MB RAM, 1 GB disco', 1, 512, 1000),
     ('medium-v1', 'Mediano: 2 vCPU, 512 MB RAM, 600 MB disco', 1, 512, 2500),

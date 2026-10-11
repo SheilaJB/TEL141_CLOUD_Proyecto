@@ -6,7 +6,13 @@ from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.worker import Worker
 
-from app.temporal_worker import NETWORK_ALLOCATE, NETWORK_ROLLBACK, NetworkActivities, create_pool
+from app.temporal_worker import (
+    NETWORK_ALLOCATE,
+    NETWORK_ROLLBACK,
+    NetworkActivities,
+    create_pool,
+)
+from contracts.queues import NETWORK_QUEUE
 
 
 async def run() -> None:
@@ -19,7 +25,7 @@ async def run() -> None:
     activities = NetworkActivities(pool)
     worker = Worker(
         client,
-        task_queue=os.getenv("TEMPORAL_TASK_QUEUE", "orchestrator-queue"),
+        task_queue=os.getenv("TEMPORAL_TASK_QUEUE", NETWORK_QUEUE),
         activities=[activities.network_allocate, activities.network_rollback],
     )
     try:

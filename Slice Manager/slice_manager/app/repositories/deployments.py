@@ -494,7 +494,7 @@ class DeploymentRepository:
         )
         if row is None:
             raise LookupError(f"deployment {deployment_id} was not found")
-        plan = DeploymentPlan.model_validate(row["plan"])
+        plan = DeploymentPlan.model_validate_json(row["plan"])
         flavors, images = await self.load_catalog(connection, row["cluster_id"])
         await self._insert_planned_inventory(
             connection,

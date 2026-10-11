@@ -26,6 +26,7 @@ from contracts.queues import (
     ACTIVITY_ROLLBACK_COMPUTE,
     COMPUTE_QUEUE,
     LINUX_QUEUE,
+    NETWORK_QUEUE,
     ORCHESTRATOR_QUEUE,
 )
 from contracts.servers import ServerHost
@@ -223,7 +224,7 @@ class DeployWorkflow:
                 ACTIVITY_NETWORK_ALLOCATE,
                 deployment_id,
                 result_type=NetworkAllocation,
-                task_queue=ORCHESTRATOR_QUEUE,
+                task_queue=NETWORK_QUEUE,
                 start_to_close_timeout=REGISTRY_ACTIVITY_TIMEOUT,
                 retry_policy=REGISTRY_RETRY_POLICY,
             )
@@ -563,7 +564,7 @@ class DeployWorkflow:
                 await self._execute_activity(
                     ACTIVITY_NETWORK_ROLLBACK,
                     deployment_id,
-                    task_queue=ORCHESTRATOR_QUEUE,
+                    task_queue=NETWORK_QUEUE,
                     start_to_close_timeout=REGISTRY_ACTIVITY_TIMEOUT,
                     retry_policy=COMPENSATION_RETRY_POLICY,
                 )
@@ -630,7 +631,7 @@ class DeployWorkflow:
     ) -> Any:
         return await workflow.execute_activity(
             activity_name,
-            *args,
+            args=list(args),
             result_type=result_type,
             task_queue=task_queue,
             start_to_close_timeout=start_to_close_timeout,

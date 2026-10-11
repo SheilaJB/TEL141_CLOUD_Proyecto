@@ -162,7 +162,7 @@ services:
       DATABASE_URL: postgresql://${APP_DB_USER:-cloud_admin}:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-cloud_g3}
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: ${ORCHESTRATOR_TEMPORAL_NAMESPACE:-default}
-      TEMPORAL_TASK_QUEUE: ${NETWORK_MANAGER_TEMPORAL_TASK_QUEUE:-orchestrator-queue}
+      TEMPORAL_TASK_QUEUE: ${NETWORK_MANAGER_TEMPORAL_TASK_QUEUE:-network-queue}
       PRIVATE_P2P_BASE: ${NETWORK_MANAGER_PRIVATE_P2P_BASE:-192.168.1.0/24}
       PUBLIC_VID: ${NETWORK_MANAGER_PUBLIC_VID:-4000}
     networks: [backend]
@@ -185,6 +185,7 @@ services:
       DB_POOL_MAX: 5
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: ${ORCHESTRATOR_TEMPORAL_NAMESPACE:-default}
+      COMPUTE_MANAGER_TEMPORAL_TASK_QUEUE: ${COMPUTE_MANAGER_TEMPORAL_TASK_QUEUE:-compute-queue}
     networks: [backend]
 
   # Worker Temporal del adaptador Linux: ejecuta acciones completas en hosts de cómputo
@@ -201,8 +202,9 @@ services:
     environment:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: ${ORCHESTRATOR_TEMPORAL_NAMESPACE:-default}
+      LINUX_ADAPTER_TEMPORAL_TASK_QUEUE: ${LINUX_ADAPTER_TEMPORAL_TASK_QUEUE:-linux-queue}
       ADAPTER_SSH_USER: ubuntu
-      ADAPTER_SSH_KEY: /run/adapter-keys/id_lab4
+      ADAPTER_SSH_KEY: /run/adapter-keys/id_rsa
       ADAPTER_KNOWN_HOSTS: /run/adapter-keys/known_hosts
       ADAPTER_SSH_TIMEOUT: 30
       ADAPTER_COMMAND_TIMEOUT: 60

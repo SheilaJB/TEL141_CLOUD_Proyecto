@@ -42,9 +42,7 @@ class TemporalWorkflowClient:
             handle = client.get_workflow_handle(workflow_id)
             await handle.signal(
                 "approval_decision",
-                approved,
-                operator_id,
-                reason,
+                args=[approved, operator_id, reason],
             )
         except (TemporalError, TimeoutError, OSError) as exc:
             raise WorkflowStartError("Temporal could not deliver approval") from exc

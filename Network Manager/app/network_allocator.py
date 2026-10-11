@@ -82,12 +82,13 @@ class NetworkAllocator:
         links_out: list[LinkAllocation] = []
         ports_out: list[PortAllocation] = []
         private_index = 0
+        next_nic_index: dict[UUID, int] = {}
 
         for link in link_list:
             if link.public:
                 links_out.append(LinkAllocation(link.link_id, True, None, None, None))
                 public_ips = self._allocate_public_ips(
-                    link, used_ips, used_mac_values, slice_id
+                    link, used_ips, used_mac_values, slice_id, next_nic_index
                 )
                 ports_out.extend(public_ips)
                 continue
@@ -106,13 +107,15 @@ class NetworkAllocator:
             hosts = list(cidr.hosts())
             if len(hosts) < len(link.node_ids):
                 raise NetworkAllocationError("NET_IP_EXHAUSTED", "private CIDR is too small")
-            for nic_index, (node_id, address) in enumerate(
-                zip(link.node_ids, hosts), start=1
-            ):
+            for node_id, address in zip(link.node_ids, hosts):
                 mac = self._mac(slice_id, link.link_id, node_id)
                 if mac in used_mac_values:
                     raise NetworkAllocationError("NET_MAC_COLLISION", "MAC collision detected")
                 used_mac_values.add(mac)
+
+                nic_index = next_nic_index.get(node_id, 0) + 1
+                next_nic_index[node_id] = nic_index
+
                 ports_out.append(
                     PortAllocation(
                         port_id=UUID(int=(link.link_id.int ^ node_id.int)),
@@ -132,6 +135,7 @@ class NetworkAllocator:
         used_ips: set[ipaddress.IPv4Address],
         used_macs: set[str],
         slice_id: int,
+        next_nic_index: dict[UUID, int],
     ) -> list[PortAllocation]:
         hosts = iter(list(self.public_base.hosts())[1:])
         result: list[PortAllocation] = []
@@ -146,6 +150,7 @@ class NetworkAllocator:
             if mac in used_macs:
                 raise NetworkAllocationError("NET_MAC_COLLISION", "MAC collision detected")
             used_macs.add(mac)
+            next_nic_index.setdefault(node_id, 0)
             result.append(
                 PortAllocation(
                     port_id=UUID(int=(link.link_id.int ^ node_id.int)),

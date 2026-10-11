@@ -20,7 +20,7 @@ async def run_worker() -> None:
     )
     worker = Worker(
         client,
-        task_queue=LINUX_QUEUE,
+        task_queue=os.getenv("LINUX_ADAPTER_TEMPORAL_TASK_QUEUE", LINUX_QUEUE),
         activities=ADAPTER_ACTIVITIES,
     )
     await worker.run()

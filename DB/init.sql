@@ -274,13 +274,10 @@ CREATE UNIQUE INDEX uq_slice_nodo_server_vnc_display
       AND server_id IS NOT NULL
       AND vnc_display IS NOT NULL;
 
-INSERT INTO slices.slice_nodo (slice_id, defin_version_id, name, flavor_id, imagen_id, estado_nodo) VALUES
-    (1, 1, 'Nodo 1A', 1, 1, 'PENDING'),
-    (1, 1, 'Nodo 1B', 2, 1, 'PENDING'),
-    (1, 1, 'Nodo 1C', 3, 1, 'PENDING'),
-    (2, 2, 'Nodo 2A', 3, 1, 'PENDING'),
-    (2, 2, 'Nodo 2B', 2, 1, 'PENDING'),
-    (2, 2, 'Nodo 2C', 1, 1, 'PENDING');
+-- INSERT INTO slices.slice_nodo (slice_id, defin_version_id, name, flavor_id, imagen_id, estado_nodo) VALUES
+--    (1, 1, 'Nodo 1A', 1, 1, 'PENDING'),
+--    (1, 1, 'Nodo 1B', 2, 1, 'PENDING'),
+--    (1, 1, 'Nodo 1C', 3, 1, 'PENDING');
 
 
 CREATE TABLE slices.slice_enlace (

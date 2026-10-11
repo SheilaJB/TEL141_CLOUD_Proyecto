@@ -1,6 +1,7 @@
 """Temporal worker entrypoint for Compute Manager."""
 
 import asyncio
+import os
 
 from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
@@ -19,7 +20,11 @@ async def run_worker() -> None:
         namespace=config.TEMPORAL_NAMESPACE,
         data_converter=pydantic_data_converter,
     )
-    worker = Worker(client, task_queue=COMPUTE_QUEUE, activities=ACTIVITIES)
+    worker = Worker(
+        client,
+        task_queue=os.getenv("COMPUTE_MANAGER_TEMPORAL_TASK_QUEUE", COMPUTE_QUEUE),
+        activities=ACTIVITIES,
+    )
     await worker.run()
 
 

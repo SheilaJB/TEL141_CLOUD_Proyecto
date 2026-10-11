@@ -27,6 +27,7 @@ def create_link(request: AdapterActionInput) -> dict:
     vlan_stag = params.get("vlan_stag")
     ## ---
     print(f"Creando link para slice {slice_id} en hosts {remote} con bridge {bridge} y VLAN STAG {vlan_stag}")
+    print(f"con params: {params}")
     ## ---
     if remote and vlan_stag is None:
         raise NonRetryableError("LINK_PARAMS_MISSING")

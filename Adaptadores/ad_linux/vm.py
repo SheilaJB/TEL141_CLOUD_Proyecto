@@ -104,6 +104,14 @@ def _exists(address: str, path: str) -> bool:
 
 
 def _ensure_overlay(address: str, base: str, overlay: str, disk_mb: int) -> None:
+    host.run(
+        address,
+        [
+            "install", "-d",
+            "-o", config.SSH_USER, "-g", config.SSH_USER, "-m", "0755",
+            str(Path(overlay).parent),
+        ],
+    )
     if _exists(address, overlay):
         info = json.loads(
             host.run(address, ["qemu-img", "info", "--output=json", overlay])
@@ -149,7 +157,15 @@ def _ensure_seed(
         for name, value in contents.items():
             (root / name).write_text(value, encoding="utf-8")
         remote_root = f"/tmp/ad-linux-{hashlib.sha1(seed.encode()).hexdigest()[:12]}"
-        host.run(address, ["mkdir", "-p", remote_root, str(Path(seed).parent)])
+        host.run(
+            address,
+            [
+                "install", "-d",
+                "-o", config.SSH_USER, "-g", config.SSH_USER, "-m", "0755",
+                remote_root,
+                str(Path(seed).parent),
+            ],
+        )
         for name in contents:
             host.upload(address, root / name, f"{remote_root}/{name}")
         host.run(

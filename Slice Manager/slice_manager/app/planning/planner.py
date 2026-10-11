@@ -26,6 +26,25 @@ from slice_manager.app.planning.definition import SliceDefinition, parse_definit
 from slice_manager.app.planning.errors import InvalidSpecError
 from slice_manager.app.planning.identities import PlanIdentityFactory
 
+# DEPLOY solo emite clase R. Clase I no se planifica aquí; no hay mezcla ni punto de no retorno.
+_DEPLOY_REVERSIBLE_OPS = frozenset(
+    {
+        ActionOp.CREATE_VM,
+        ActionOp.CREATE_LINK,
+        ActionOp.ATTACH_PORT,
+    }
+)
+
+
+def _assert_deploy_rounds_are_reversible(rounds: list[list[Action]]) -> None:
+    for round_index, round_actions in enumerate(rounds, start=1):
+        mixed = [action.op.value for action in round_actions if action.op not in _DEPLOY_REVERSIBLE_OPS]
+        if mixed:
+            raise InvalidSpecError(
+                f"round {round_index} mixes irreversible op(s) into a reversible DEPLOY round: "
+                f"{', '.join(mixed)}"
+            )
+
 
 @dataclass(frozen=True, slots=True)
 class CatalogFlavor:
@@ -232,6 +251,7 @@ def _build_plan(
     next_intent = 1
     vm_create_actions: dict[str, str] = {}
     link_create_actions: dict[str, str] = {}
+    vm_attach_actions: dict[str, set[str]] = {vm.name: set() for vm in definition.vms}
 
     for vm in sorted(definition.vms, key=lambda item: item.name):
         flavor, image, node_id = resolved[vm.name]
@@ -330,6 +350,7 @@ def _build_plan(
             attach_id = f"a{next_action}"
             next_action += 1
             node_id = resolved[endpoint][2]
+            # Deploy: taps antes de QEMU (hot_attach_port=false). UPDATE+hot_attach queda fuera de alcance.
             append_action(
                 Action(
                     id=attach_id,
@@ -345,8 +366,9 @@ def _build_plan(
                     params={},
                     after={"link_id": str(link_id), "node_id": str(node_id)},
                 ),
-                after={link_create_actions[link.name], vm_create_actions[endpoint]},
+                after={link_create_actions[link.name]},
             )
+            vm_attach_actions[endpoint].add(attach_id)
 
     public_vms = [
         vm
@@ -416,8 +438,12 @@ def _build_plan(
                         "public": True,
                     },
                 ),
-                after={public_create_action_id, vm_create_actions[vm.name]},
+                after={public_create_action_id},
             )
+            vm_attach_actions[vm.name].add(public_attach_action_id)
+
+    for vm_name, create_action_id in vm_create_actions.items():
+        dependencies[create_action_id] = set(vm_attach_actions[vm_name])
 
     ordered_rounds: list[list[Action]] = []
     sorter = TopologicalSorter(dependencies)
@@ -429,6 +455,8 @@ def _build_plan(
             raise InvalidSpecError("action dependency graph contains a cycle")
         ordered_rounds.append([action_by_id[action_id] for action_id in ready])
         sorter.done(*ready)
+
+    _assert_deploy_rounds_are_reversible(ordered_rounds)
 
     reservation, resource_delta = calculate_reservation_plan(
         intents,

@@ -10,6 +10,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from app.network_allocator import LinkInput, NetworkAllocationError, NetworkAllocator
+from app.config import config
 
 
 NETWORK_ALLOCATE = "network_allocate"
@@ -206,6 +207,18 @@ class NetworkActivities:
                             "node_id": item.node_id,
                             "public": item.public,
                             "ip": str(item.ip),
+                            "prefijo": (
+                                allocator.public_base.prefixlen
+                                if item.public
+                                else next(
+                                    link.cidr.prefixlen
+                                    for link in allocated_links
+                                    if link.link_id == item.link_id and link.cidr is not None
+                                )
+                            ),
+                            "gateway": (
+                                config.internet_gw_ip if item.public else None
+                            ),
                             "mac": item.mac,
                             "nic_index": item.nic_index,
                         }

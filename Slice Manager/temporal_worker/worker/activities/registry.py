@@ -81,6 +81,41 @@ class DeploymentActivities:
                 raise ValueError(f"missing vnc_display for node {node_id}")
             return int(value)
 
+        def nic_for(port: NetworkPortAllocation) -> dict[str, object]:
+            if (
+                not port.mac
+                or not port.ip
+                or port.nic_index is None
+                or port.prefijo is None
+            ):
+                raise ValueError(
+                    f"incomplete network allocation for port {port.port_id}"
+                )
+            if port.publico and not port.gateway:
+                raise ValueError(f"missing public gateway for port {port.port_id}")
+            if not port.publico and port.gateway is not None:
+                raise ValueError(
+                    f"private port {port.port_id} must not have a gateway"
+                )
+            return {
+                "port_id": str(port.port_id),
+                "ip": port.ip,
+                "mac": port.mac,
+                "nic_index": port.nic_index,
+                "publico": port.publico,
+                "prefijo": port.prefijo,
+                "gateway": port.gateway,
+                "public_vid": network.public_vid,
+                "vlan_ctag": next(
+                    (
+                        link.vlan_c
+                        for link in network.links
+                        if link.link_id == port.link_id
+                    ),
+                    None,
+                ),
+            }
+
         def reject_commands(value: object) -> None:
             if isinstance(value, str) and any(
                 token in value.lower()
@@ -111,7 +146,15 @@ class DeploymentActivities:
                             f"missing network allocation for link {action.target.id}"
                         )
                     params["network"] = allocation.model_dump(mode="json")
-                    params["vlan_stag"] = allocation.vlan_s
+                    if allocation.publico:
+                        params["public_vid"] = network.public_vid
+                        params["vlan_stag"] = network.public_vid
+                    else:
+                        if allocation.vlan_s is None:
+                            raise ValueError(
+                                f"missing vlan_s for private link {action.target.id}"
+                            )
+                        params["vlan_stag"] = allocation.vlan_s
                     link_server_ids: set[int] = set()
                     for port in network.ports:
                         if port.link_id != action.target.id:
@@ -164,22 +207,7 @@ class DeploymentActivities:
                     host = host_for(server_id)
                     params["vnc_display"] = display_for(action.target.id)
                     params["nics"] = [
-                        {
-                            "port_id": str(port.port_id),
-                            "ip": port.ip,
-                            "mac": port.mac,
-                            "nic_index": port.nic_index,
-                            "publico": port.publico,
-                            "public_vid": network.public_vid,
-                            "vlan_ctag": next(
-                                (
-                                    link.vlan_c
-                                    for link in network.links
-                                    if link.link_id == port.link_id
-                                ),
-                                None,
-                            ),
-                        }
+                        nic_for(port)
                         for port in sorted(
                             ports_by_node.get(action.target.id, []),
                             key=lambda item: (

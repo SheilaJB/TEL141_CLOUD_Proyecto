@@ -37,6 +37,8 @@ class NetworkPortAllocation(ContractModel):
         validation_alias=AliasChoices("publico", "public"),
     )
     ip: str | None = None
+    prefijo: int | None = Field(default=None, ge=0, le=32)
+    gateway: str | None = None
     mac: str | None = None
     nic_index: int | None = Field(default=None, ge=0)
 

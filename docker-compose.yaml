@@ -148,8 +148,8 @@ services:
   # Worker Temporal del Network Manager
   network-manager-worker:
     build:
-      context: ./Network Manager
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: Network Manager/Dockerfile
     restart: unless-stopped
     depends_on:
       postgres:

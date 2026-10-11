@@ -6,10 +6,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY ["Network Manager/requirements.txt", "/app/requirements.txt"]
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app/ ./app/
-COPY temporal_worker.py .
+COPY ["Network Manager/app/", "/app/"]
+COPY ["Slice Manager/contracts/contracts/", "/app/contracts/"]
+COPY ["Network Manager/temporal_worker.py", "."]
+
 
 ENTRYPOINT ["python", "temporal_worker.py"]

@@ -34,6 +34,11 @@ def create_vm(request: AdapterActionInput) -> dict:
     vm_name = "vm-" + vm_id[:8]
     image = params.get("image") or {}
     flavor = params.get("flavor") or {}
+    ## ---
+    print(f"Creating VM {vm_name} on host {target.management_ip} with params: {params}")
+    print(f"Image: {image}. Base path: {config.STORAGE_ROOT / 'base' / str(image.get('reference'))}")
+    print(f"Flavor details - RAM: {flavor.get('ram_mb')} MB, vCPUs: {flavor.get('vcpu')}, Disk: {flavor.get('disk_mb')} MB")
+    ## ---
     try:
         vnc_display = int(params["vnc_display"])
         ram_mb = int(flavor["ram_mb"])
@@ -43,7 +48,7 @@ def create_vm(request: AdapterActionInput) -> dict:
         raise NonRetryableError("VM_PARAMS_INCOMPLETE") from exc
     if not 1 <= vnc_display <= 99 or ram_mb <= 0 or vcpus <= 0 or disk_mb <= 0:
         raise NonRetryableError("VM_PARAMS_INVALID")
-    base_ref = image.get("base_ref")
+    base_ref = image.get("reference")
     if not base_ref:
         raise NonRetryableError("BASE_MISSING")
     base = str(config.STORAGE_ROOT / "base" / str(base_ref))

@@ -124,7 +124,7 @@ CREATE TABLE slices.zona_disponibilidad (
 );
 
 INSERT INTO slices.zona_disponibilidad (nombre, cluster_id, cpu_allocation_ratio_default, cpu_allocation_ratio_limit, ram_allocation_ratio_default, ram_allocation_ratio_limit, disk_allocation_ratio_default, disk_allocation_ratio_limit) VALUES
-    ('linx-1', 1, 7.0, 8.0, 1.5, 2.0, 1.0, 1.5),     -- Linux: nivel basico y avanzado, densidad alta 
+    ('linx-1', 1, 1.0, 1.5, 1.0, 1.5, 1.0, 1.5),     -- Linux: nivel basico y avanzado, densidad alta 
     ('linx-2', 1, 4.0, 5.5, 2.0, 2.5, 1.0, 1.5),     -- Linux: nivel avanzado, densidad baja
     ('openst-1', 2, 6.0, 7.5, 1.0, 1.5, 1.0, 1.5);     -- OpenStack: nivel avanzado, densidad media
 
@@ -158,11 +158,11 @@ CREATE TABLE slices.servidor (
 );
 
 INSERT INTO slices.servidor (ip_serv, mac_serv, total_cpu_cores, total_ram_mb, total_disk_mb, zona_id) VALUES
-    ('10.0.10.1', '00:11:22:33:44:55', 8, 16384, 1000, 1),
-    ('10.0.10.2', '00:11:22:33:44:56', 8, 16384, 1000, 1),
-    ('10.0.10.3', '00:11:22:33:44:57', 16, 16384, 1000, 2),
-    ('192.168.1.14', '00:11:22:33:44:59', 16, 16384, 102400, 3),
-    ('192.168.1.15', '00:11:22:33:44:60', 8, 16384, 102400, 3);
+    ('10.0.10.1', 'fa:16:3e:b5:67:64', 6, 5430, 16200, 1),
+    ('10.0.10.2', 'fa:16:3e:7e:ec:a4', 6, 5430, 16600, 1),
+    ('10.0.10.3', 'fa:16:3e:05:b2:5d', 6, 5430, 15800, 1);
+    -- ('192.168.1.14', '00:11:22:33:44:59', 16, 16384, 102400, 3),
+    -- ('192.168.1.15', '00:11:22:33:44:60', 8, 16384, 102400, 3);
 
 CREATE TABLE slices.image (
     id                      SERIAL PRIMARY KEY,
@@ -174,9 +174,9 @@ CREATE TABLE slices.image (
 );
 
 INSERT INTO slices.image (nombre, cluster_compatible, ruta_referencia) VALUES
-    ('Cirros', 1, '/images/cirros.qcow2'),
-    ('Linux Alpine', 1, '/images/alpine.qcow2'),
-    ('Ubuntu', 1, '/images/ubuntu.qcow2');
+    ('Cirros', 1, 'cirros-0.6.2-x86_64-disk.img'),
+    -- ('Linux Alpine', 1, '/images/alpine.qcow2'),
+    ('Ubuntu', 1, 'focal-server-cloudimg-amd64.img');
 
 CREATE TABLE slices.flavor (
     id                  SERIAL PRIMARY KEY,
@@ -225,8 +225,7 @@ CREATE TABLE slices.slice (
 INSERT INTO slices.slice
     (usuario_id, nombre, estado, zona_id, cluster_id, version_activa_id)
 VALUES
-    (1, 'Slice de prueba 1', 'DRAFT', 1, 1, NULL),
-    (2, 'Slice de prueba 2', 'DRAFT', 2, 1, NULL);
+    (1, 'Slice de prueba 1', 'DRAFT', 1, 1, NULL);
 
 CREATE TABLE slices.slice_version (
     id                  SERIAL PRIMARY KEY,
@@ -242,8 +241,7 @@ CREATE TABLE slices.slice_version (
 );
 
 INSERT INTO slices.slice_version (slice_id, numero_version, spec, custom, plantilla_origen_id, estado_version) VALUES
-    (1, 1, '{"nodos": [], "enlaces": []}', FALSE, NULL, 'DRAFT'),
-    (2, 1, '{"nodos": [], "enlaces": []}', FALSE, NULL, 'DRAFT');
+    (1, 1, '{"nodos": [], "enlaces": []}', FALSE, NULL, 'DRAFT');
 
 ALTER TABLE slices.slice
     ADD CONSTRAINT fk_slices_version_activa
@@ -264,10 +262,17 @@ CREATE TABLE slices.slice_nodo (
                             estado_nodo IN ('PENDING', 'RUNNING', 'STOPPED', 'FAILED', 'DELETED')
                         ),
     public_access       BOOLEAN NOT NULL DEFAULT FALSE,
-    puerto_vnc          INTEGER DEFAULT NULL,
+    server_id           INTEGER DEFAULT NULL,
+    vnc_display         INTEGER DEFAULT NULL,
     pid                 INTEGER DEFAULT NULL,
     deployment_id       INTEGER
 );
+
+CREATE UNIQUE INDEX uq_slice_nodo_server_vnc_display
+    ON slices.slice_nodo (server_id, vnc_display)
+    WHERE estado_nodo <> 'DELETED'
+      AND server_id IS NOT NULL
+      AND vnc_display IS NOT NULL;
 
 INSERT INTO slices.slice_nodo (slice_id, defin_version_id, name, flavor_id, imagen_id, estado_nodo) VALUES
     (1, 1, 'Nodo 1A', 1, 1, 'PENDING'),

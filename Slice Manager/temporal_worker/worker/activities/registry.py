@@ -5,10 +5,15 @@ from contracts.placement import (
     PlacementReserveResponse,
     PlacementRollbackResponse,
 )
-from contracts.adapter import AdapterActionInput
-from contracts.network import NetworkAllocation
+from contracts.adapter import AdapterActionInput, AdapterHost
+from contracts.servers import ServerHost
+from contracts.network import NetworkAllocation, NetworkPortAllocation
 from contracts.plan import ActionOp, DeploymentPlan
-from contracts.queues import ACTIVITY_BUILD_ADAPTER_ACTIONS
+from contracts.queues import (
+    ACTIVITY_BUILD_ADAPTER_ACTIONS,
+    ACTIVITY_CREATE_INVENTORY,
+    ACTIVITY_GET_SERVER_DIRECTORY,
+)
 from contracts.registry import (
     ApprovalState,
     DeploymentContext,
@@ -18,6 +23,7 @@ from contracts.registry import (
     StartDeployment,
 )
 from temporalio import activity
+from uuid import UUID
 from contracts.queues import (
     ACTIVITY_FINISH_DEPLOYMENT,
     ACTIVITY_GET_APPROVAL_STATE,
@@ -43,12 +49,37 @@ class DeploymentActivities:
         plan: DeploymentPlan,
         placement: PlacementResult,
         network: NetworkAllocation,
+        server_directory: list[ServerHost],
+        vnc_displays: dict[str, int],
     ) -> list[AdapterActionInput]:
         if placement.deployment_id != deployment_id or network.deployment_id != deployment_id:
             raise ValueError("decision results belong to a different deployment")
         link_allocations = {item.link_id: item for item in network.links}
         port_allocations = {item.port_id: item for item in network.ports}
+        ports_by_node: dict[UUID, list[NetworkPortAllocation]] = {}
+        for port in network.ports:
+            ports_by_node.setdefault(port.node_id, []).append(port)
         actions: list[AdapterActionInput] = []
+
+        def host_for(server_id: int) -> AdapterHost:
+            server = next(
+                (item for item in server_directory if item.server_id == server_id),
+                None,
+            )
+            if server is None:
+                raise ValueError(
+                    f"missing management_ip for Placement server {server_id}"
+                )
+            return AdapterHost(
+                server_id=server.server_id,
+                management_ip=server.management_ip,
+            )
+
+        def display_for(node_id: UUID) -> int:
+            value = vnc_displays.get(str(node_id))
+            if value is None:
+                raise ValueError(f"missing vnc_display for node {node_id}")
+            return int(value)
 
         def reject_commands(value: object) -> None:
             if isinstance(value, str) and any(
@@ -71,6 +102,8 @@ class DeploymentActivities:
             for action in round_actions:
                 params = dict(action.params)
                 server_id: int | None = None
+                host = None
+                hosts: list[AdapterHost] = []
                 if action.op == ActionOp.CREATE_LINK:
                     allocation = link_allocations.get(action.target.id)
                     if allocation is None:
@@ -78,6 +111,25 @@ class DeploymentActivities:
                             f"missing network allocation for link {action.target.id}"
                         )
                     params["network"] = allocation.model_dump(mode="json")
+                    params["vlan_stag"] = allocation.vlan_s
+                    link_server_ids: set[int] = set()
+                    for port in network.ports:
+                        if port.link_id != action.target.id:
+                            continue
+                        server = placement.server_by_node.get(port.node_id)
+                        if server is None:
+                            raise ValueError(
+                                f"missing Placement result for node {port.node_id}"
+                            )
+                        link_server_ids.add(server)
+                    if not link_server_ids:
+                        raise ValueError(
+                            f"missing endpoints for link {action.target.id}"
+                        )
+                    hosts = [
+                        host_for(server)
+                        for server in sorted(link_server_ids)
+                    ]
                 elif action.op == ActionOp.ATTACH_PORT:
                     allocation = port_allocations.get(action.target.id)
                     if allocation is None:
@@ -85,17 +137,56 @@ class DeploymentActivities:
                             f"missing network allocation for port {action.target.id}"
                         )
                     params["network"] = allocation.model_dump(mode="json")
+                    params["vlan_ctag"] = (
+                        next(
+                            (
+                                link.vlan_c
+                                for link in network.links
+                                if link.link_id == allocation.link_id
+                            ),
+                            None,
+                        )
+                    )
+                    params["publico"] = allocation.publico
+                    params["public_vid"] = network.public_vid
                     server_id = placement.server_by_node.get(action.target.node_id)
                     if server_id is None:
                         raise ValueError(
                             f"missing Placement result for node {action.target.node_id}"
                         )
+                    host = host_for(server_id)
                 elif action.op == ActionOp.CREATE_VM:
                     server_id = placement.server_by_node.get(action.target.id)
                     if server_id is None:
                         raise ValueError(
                             f"missing Placement result for node {action.target.id}"
                         )
+                    host = host_for(server_id)
+                    params["vnc_display"] = display_for(action.target.id)
+                    params["nics"] = [
+                        {
+                            "port_id": str(port.port_id),
+                            "ip": port.ip,
+                            "mac": port.mac,
+                            "nic_index": port.nic_index,
+                            "publico": port.publico,
+                            "public_vid": network.public_vid,
+                            "vlan_ctag": next(
+                                (
+                                    link.vlan_c
+                                    for link in network.links
+                                    if link.link_id == port.link_id
+                                ),
+                                None,
+                            ),
+                        }
+                        for port in sorted(
+                            ports_by_node.get(action.target.id, []),
+                            key=lambda item: (
+                                item.nic_index if item.nic_index is not None else -1
+                            ),
+                        )
+                    ]
                 enriched = action.model_copy(
                     update={"params": params, "frozen": False}
                 )
@@ -107,6 +198,8 @@ class DeploymentActivities:
                         slice_id=network.slice_id,
                         action=enriched,
                         server_id=server_id,
+                        host=host,
+                        hosts=hosts,
                     )
                 )
         return actions
@@ -118,8 +211,25 @@ class DeploymentActivities:
         plan: DeploymentPlan,
         placement: PlacementResult,
         network: NetworkAllocation,
+        server_directory: list[ServerHost],
+        vnc_displays: dict[str, int],
     ) -> list[AdapterActionInput]:
-        return self._build_adapter_actions(deployment_id, plan, placement, network)
+        return self._build_adapter_actions(
+            deployment_id,
+            plan,
+            placement,
+            network,
+            server_directory,
+            vnc_displays,
+        )
+
+    @activity.defn(name=ACTIVITY_CREATE_INVENTORY)
+    async def create_inventory(self, deployment_id: int) -> None:
+        await self._slice_manager.create_inventory(deployment_id)
+
+    @activity.defn(name=ACTIVITY_GET_SERVER_DIRECTORY)
+    async def get_server_directory(self, slice_id: int) -> list[ServerHost]:
+        return await self._slice_manager.get_server_directory(slice_id)
 
     @activity.defn(name=ACTIVITY_GET_PLAN)
     async def get_plan(self, deployment_id: int) -> DeploymentContext:

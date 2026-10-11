@@ -18,6 +18,7 @@ from contracts.registry import (
     RoundFactsResult,
     StartDeployment,
 )
+from contracts.servers import ServerHost
 
 
 class SliceManagerClient:
@@ -37,6 +38,15 @@ class SliceManagerClient:
             "GET", f"/internal/deployments/{deployment_id}/plan"
         )
         return DeploymentContext.model_validate(response)
+
+    async def create_inventory(self, deployment_id: int) -> None:
+        await self._request("POST", f"/internal/deployments/{deployment_id}/inventory")
+
+    async def get_server_directory(self, slice_id: int) -> list[ServerHost]:
+        response = await self._request(
+            "GET", f"/internal/slices/{slice_id}/server-directory"
+        )
+        return [ServerHost.model_validate(item) for item in response]
 
     async def get_approval_state(self, deployment_id: int) -> ApprovalState:
         response = await self._request(

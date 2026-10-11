@@ -150,6 +150,7 @@ services:
     build:
       context: ./Network Manager
       dockerfile: Dockerfile
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -165,6 +166,52 @@ services:
       PRIVATE_P2P_BASE: ${NETWORK_MANAGER_PRIVATE_P2P_BASE:-192.168.1.0/24}
       PUBLIC_VID: ${NETWORK_MANAGER_PUBLIC_VID:-4000}
     networks: [backend]
+
+  # Worker Temporal del Compute Manager: decisiones y registro de displays
+  compute-manager-worker:
+    build:
+      context: .
+      dockerfile: Computer Manager2/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      temporal-create-namespace:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${APP_DB_USER:-cloud_admin}:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-cloud_g3}
+      DB_POOL_MAX: 5
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${ORCHESTRATOR_TEMPORAL_NAMESPACE:-default}
+    networks: [backend]
+
+  # Worker Temporal del adaptador Linux: ejecuta acciones completas en hosts de cómputo
+  linux-adapter-worker:
+    build:
+      context: .
+      dockerfile: Adaptadores/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_healthy
+      temporal-create-namespace:
+        condition: service_completed_successfully
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${ORCHESTRATOR_TEMPORAL_NAMESPACE:-default}
+      ADAPTER_SSH_USER: ubuntu
+      ADAPTER_SSH_KEY: /run/adapter-keys/id_lab4
+      ADAPTER_KNOWN_HOSTS: /run/adapter-keys/known_hosts
+      ADAPTER_SSH_TIMEOUT: 30
+      ADAPTER_COMMAND_TIMEOUT: 60
+      ADAPTER_STORAGE_ROOT: /storage
+      ADAPTER_RUN_ROOT: /run/vms
+      ADAPTER_PUBLIC_VID: ${NETWORK_MANAGER_PUBLIC_VID:-4000}
+    volumes:
+      - ${ADAPTER_KEYS_DIR:-./Adaptadores/keys}:/run/adapter-keys:ro
+    networks: [backend, adapter]
 
   # Microservicio AuthAuthz (Stateful, emite RS256, rota refresh en Postgres)
   auth:
@@ -220,6 +267,11 @@ networks:
     internal: true
   public:
     driver: bridge
+  adapter:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.10.0/24
 
 volumes:
   pgdata:

@@ -1,4 +1,5 @@
 ORCHESTRATOR_QUEUE = "orchestrator-queue"
+COMPUTE_QUEUE = "compute-queue"
 LINUX_QUEUE = "linux-queue"
 OPENSTACK_QUEUE = "openstack-queue"
 
@@ -12,3 +13,7 @@ ACTIVITY_ROLLBACK_PLACEMENT = "rollback_reservation"
 ACTIVITY_NETWORK_ALLOCATE = "network_allocate"
 ACTIVITY_NETWORK_ROLLBACK = "network_rollback"
 ACTIVITY_BUILD_ADAPTER_ACTIONS = "build_adapter_actions"
+ACTIVITY_CREATE_INVENTORY = "create_inventory"
+ACTIVITY_GET_SERVER_DIRECTORY = "get_server_directory"
+ACTIVITY_COMPUTE_ALLOCATE = "compute_allocate"
+ACTIVITY_ROLLBACK_COMPUTE = "rollback_compute"

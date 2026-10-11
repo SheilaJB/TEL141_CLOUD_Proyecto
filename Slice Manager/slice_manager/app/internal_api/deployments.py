@@ -16,6 +16,7 @@ from contracts.registry import (
     RoundFactsResult,
     StartDeployment,
 )
+from contracts.servers import ServerHost
 from slice_manager.app.api.dependencies import get_slice_service, require_internal_service
 from slice_manager.app.domain.slice_service import SliceService
 
@@ -50,6 +51,22 @@ async def get_plan(
     service: Annotated[SliceService, Depends(get_slice_service)],
 ) -> DeploymentContext:
     return await service.get_plan(deployment_id)
+
+
+@router.get("/slices/{slice_id}/server-directory")
+async def get_server_directory(
+    slice_id: int,
+    service: Annotated[SliceService, Depends(get_slice_service)],
+) -> list[ServerHost]:
+    return await service.get_server_directory(slice_id)
+
+
+@router.post("/deployments/{deployment_id}/inventory", status_code=204)
+async def create_inventory(
+    deployment_id: int,
+    service: Annotated[SliceService, Depends(get_slice_service)],
+) -> None:
+    await service.create_inventory(deployment_id)
 
 
 @router.get(

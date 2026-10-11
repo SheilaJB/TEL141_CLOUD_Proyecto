@@ -24,12 +24,16 @@ from contracts.slices import (
     ValidationPreview,
     VersionCreated,
 )
+from contracts.compute import ComputeAllocation, ComputePlacement
+from contracts.servers import ServerHost
 
 __all__ = [
     "Action",
     "ActionOp",
     "CreateSliceRequest",
     "CreateVersionRequest",
+    "ComputeAllocation",
+    "ComputePlacement",
     "DeploymentPlan",
     "ErrorCode",
     "ErrorResponse",
@@ -49,4 +53,5 @@ __all__ = [
     "SliceCreated",
     "ValidationPreview",
     "VersionCreated",
+    "ServerHost",
 ]

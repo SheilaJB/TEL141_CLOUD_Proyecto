@@ -49,6 +49,8 @@ async def run_worker() -> None:
             activities.reserve,
             activities.rollback_reservation,
             activities.build_adapter_actions,
+            activities.create_inventory,
+            activities.get_server_directory,
         ],
     )
     try:

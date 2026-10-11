@@ -39,6 +39,7 @@ class ActionOp(StrEnum):
     DELETE_LINK = "DELETE_LINK"
     ATTACH_PORT = "ATTACH_PORT"
     DETACH_PORT = "DETACH_PORT"
+    DESTROY_SLICE_HOST = "DESTROY_SLICE_HOST"
 
 
 class Executor(StrEnum):
@@ -50,6 +51,7 @@ class TargetKind(StrEnum):
     VM = "vm"
     LINK = "link"
     PORT = "port"
+    SLICE = "slice"
 
 
 class ResourceVector(ContractModel):

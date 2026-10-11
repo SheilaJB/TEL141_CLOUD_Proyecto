@@ -4,6 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from contracts.adapter import AdapterActionInput, AdapterActionOutput
+from contracts.compute import ComputeAllocation, ComputePlacement
 from contracts.errors import ErrorCode, ErrorResponse
 from contracts.plan import Action, ActionOp, Executor
 from contracts.network import NetworkAllocation
@@ -19,8 +20,15 @@ from contracts.queues import (
     ACTIVITY_NETWORK_ALLOCATE,
     ACTIVITY_NETWORK_ROLLBACK,
     ACTIVITY_BUILD_ADAPTER_ACTIONS,
+    ACTIVITY_CREATE_INVENTORY,
+    ACTIVITY_GET_SERVER_DIRECTORY,
+    ACTIVITY_COMPUTE_ALLOCATE,
+    ACTIVITY_ROLLBACK_COMPUTE,
+    COMPUTE_QUEUE,
+    LINUX_QUEUE,
     ORCHESTRATOR_QUEUE,
 )
+from contracts.servers import ServerHost
 from contracts.registry import (
     ActionFact,
     ApprovalState,
@@ -133,8 +141,11 @@ class DeployWorkflow:
         reservation_attempted = False
         context: DeploymentContext | None = None
         allocation_by_node: dict[UUID, int] = {}
+        vnc_by_node: dict[str, int] = {}
+        server_directory: list[ServerHost] = []
         network_allocation: NetworkAllocation | None = None
         prepared_actions: dict[str, AdapterActionInput] = {}
+        compute_attempted = False
         reversibility_reached = False
 
         try:
@@ -190,6 +201,12 @@ class DeployWorkflow:
                 deployment_id,
                 result_type=DeploymentContext,
                 task_queue=ORCHESTRATOR_QUEUE,
+            )
+            await self._execute_activity(
+                ACTIVITY_CREATE_INVENTORY,
+                deployment_id,
+                task_queue=ORCHESTRATOR_QUEUE,
+                retry_policy=REGISTRY_RETRY_POLICY,
             )
             reserve_task = None
             if context.plan.reservation.allocate:
@@ -252,12 +269,37 @@ class DeployWorkflow:
                     type=ErrorCode.CONFLICT.value,
                     non_retryable=True,
                 )
+            compute_attempted = True
+            compute_allocations = await self._execute_activity(
+                ACTIVITY_COMPUTE_ALLOCATE,
+                deployment_id,
+                [
+                    ComputePlacement(node_id=node_id, server_id=server_id)
+                    for node_id, server_id in placement_result.server_by_node.items()
+                ],
+                result_type=list[ComputeAllocation],
+                task_queue=COMPUTE_QUEUE,
+                start_to_close_timeout=REGISTRY_ACTIVITY_TIMEOUT,
+                retry_policy=PLACEMENT_RETRY_POLICY,
+            )
+            vnc_by_node = {
+                str(item.node_id): item.vnc_display for item in compute_allocations
+            }
+            server_directory = await self._execute_activity(
+                ACTIVITY_GET_SERVER_DIRECTORY,
+                context.slice_id,
+                result_type=list[ServerHost],
+                task_queue=ORCHESTRATOR_QUEUE,
+                retry_policy=REGISTRY_RETRY_POLICY,
+            )
             prepared = await self._execute_activity(
                 ACTIVITY_BUILD_ADAPTER_ACTIONS,
                 deployment_id,
                 context.plan,
                 placement_result,
                 network_allocation,
+                server_directory,
+                vnc_by_node,
                 result_type=list[AdapterActionInput],
                 task_queue=ORCHESTRATOR_QUEUE,
                 start_to_close_timeout=REGISTRY_ACTIVITY_TIMEOUT,
@@ -316,6 +358,7 @@ class DeployWorkflow:
                 allocation_by_node=allocation_by_node,
                 reservation_attempted=reservation_attempted,
                 prepared_actions=prepared_actions,
+                compute_attempted=compute_attempted,
             )
             if compensation_error is not None:
                 await self._finish(
@@ -433,14 +476,18 @@ class DeployWorkflow:
                     type=ErrorCode.CONFLICT.value,
                     non_retryable=True,
                 )
-        queue_name = f"{context.cluster_name}-queue"
+        queue_name = LINUX_QUEUE
         idempotency_suffix = f"compensate:{action.id}" if compensating else action.id
+        host = prepared_action.host if prepared_action is not None else None
+        hosts = prepared_action.hosts if prepared_action is not None else []
         request = AdapterActionInput(
             idempotency_key=f"{context.deployment_id}:{idempotency_suffix}",
             deployment_id=context.deployment_id,
             slice_id=context.slice_id,
             action=action,
             server_id=server_id,
+            host=host,
+            hosts=hosts,
         )
         activity_name = ADAPTER_ACTIVITIES[action.op]
         workflow.logger.info(
@@ -475,8 +522,20 @@ class DeployWorkflow:
         allocation_by_node: dict[UUID, int],
         reservation_attempted: bool,
         prepared_actions: dict[str, AdapterActionInput],
+        compute_attempted: bool,
     ) -> ErrorResponse | None:
         compensation_error: ErrorResponse | None = None
+        if compute_attempted:
+            try:
+                await self._execute_activity(
+                    ACTIVITY_ROLLBACK_COMPUTE,
+                    deployment_id,
+                    task_queue=COMPUTE_QUEUE,
+                    retry_policy=COMPENSATION_RETRY_POLICY,
+                )
+            except (ActivityError, ApplicationError) as exc:
+                if compensation_error is None:
+                    compensation_error = self._error_from_exception(exc)
         if context is not None:
             for action in reversed(applied):
                 inverse = self._inverse_action(action)

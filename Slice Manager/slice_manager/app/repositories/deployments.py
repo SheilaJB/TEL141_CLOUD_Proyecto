@@ -381,6 +381,7 @@ class DeploymentRepository:
                         (id, slice_id, name, defin_version_id, flavor_id, imagen_id,
                          public_access, estado_nodo, deployment_id)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8)
+                    ON CONFLICT (id) DO NOTHING
                     """,
                     action.target.id,
                     slice_id,
@@ -405,6 +406,7 @@ class DeploymentRepository:
                     INSERT INTO slices.slice_enlace
                         (id, slice_id, name, public, defin_version_id, deployment_id)
                     VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (id) DO NOTHING
                     """,
                     action.target.id,
                     slice_id,
@@ -434,6 +436,7 @@ class DeploymentRepository:
                 INSERT INTO slices.slice_enlace_puerto
                     (id, enlace_id, nodo_id, public, defin_version_id, deployment_id)
                 VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (id) DO NOTHING
                 """,
                 port_id,
                 link_id,
@@ -458,6 +461,49 @@ class DeploymentRepository:
             WHERE d.id = $1
             """,
             deployment_id,
+        )
+
+    async def get_server_directory(
+        self, connection: asyncpg.Connection, slice_id: int
+    ) -> list[asyncpg.Record]:
+        return await connection.fetch(
+            """
+            SELECT srv.id AS server_id, host(srv.ip_serv) AS management_ip
+                FROM slices.slice AS s
+              JOIN slices.servidor AS srv
+                ON srv.zona_id = s.zona_id
+               AND srv.estado = 'ACTIVE'
+             WHERE s.id = $1
+             ORDER BY srv.id
+            """,
+            slice_id,
+        )
+
+    async def create_inventory(
+        self, connection: asyncpg.Connection, deployment_id: int
+    ) -> None:
+        row = await connection.fetchrow(
+            """
+            SELECT d.plan, d.slice_id, d.target_version_id, s.cluster_id
+              FROM slices.deployment AS d
+              JOIN slices.slice AS s ON s.id = d.slice_id
+             WHERE d.id = $1
+             FOR UPDATE OF d
+            """,
+            deployment_id,
+        )
+        if row is None:
+            raise LookupError(f"deployment {deployment_id} was not found")
+        plan = DeploymentPlan.model_validate(row["plan"])
+        flavors, images = await self.load_catalog(connection, row["cluster_id"])
+        await self._insert_planned_inventory(
+            connection,
+            slice_id=row["slice_id"],
+            version_id=row["target_version_id"],
+            deployment_id=deployment_id,
+            plan=plan,
+            flavors=flavors,
+            images=images,
         )
 
     async def get_approval_state(
@@ -508,17 +554,6 @@ class DeploymentRepository:
             WHERE id = $1 AND estado_version = 'APPROVAL_PENDING'
             """,
             row["target_version_id"],
-        )
-        plan = DeploymentPlan.model_validate(row["plan"])
-        flavors, images = await self.load_catalog(connection, row["cluster_id"])
-        await self._insert_planned_inventory(
-            connection,
-            slice_id=row["slice_id"],
-            version_id=row["target_version_id"],
-            deployment_id=deployment_id,
-            plan=plan,
-            flavors=flavors,
-            images=images,
         )
 
     async def reserve_deployment_placement(

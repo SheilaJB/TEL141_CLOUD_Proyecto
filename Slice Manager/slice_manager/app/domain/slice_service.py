@@ -16,6 +16,7 @@ from contracts.registry import (
     RoundFactsResult,
     StartDeployment,
 )
+from contracts.servers import ServerHost
 from contracts.placement import (
     PlacementReserveRequest,
     PlacementReserveResponse,
@@ -353,6 +354,29 @@ class SliceService:
             cluster_name=row["cluster_name"],
             plan=DeploymentPlan.model_validate_json(plan_json),
         )
+
+    async def get_server_directory(self, slice_id: int) -> list[ServerHost]:
+        async with self._pool.acquire() as connection:
+            rows = await self._repository.get_server_directory(
+                connection, slice_id
+            )
+        return [
+            ServerHost(
+                server_id=int(row["server_id"]),
+                management_ip=str(row["management_ip"]),
+            )
+            for row in rows
+        ]
+
+    async def create_inventory(self, deployment_id: int) -> None:
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                try:
+                    await self._repository.create_inventory(connection, deployment_id)
+                except LookupError as exc:
+                    raise ResourceNotFoundError(str(exc)) from exc
+                except ValueError as exc:
+                    raise ConflictError(str(exc)) from exc
 
     async def reserve_placement(
         self, request: PlacementReserveRequest

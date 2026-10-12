@@ -19,7 +19,7 @@ from .errors import NonRetryableError, RetryableError
 USE_SEED = True
 # Imagenes sin cloud-init real: no reciben seed. Se detectan por el nombre del
 # archivo base, porque "cloud_init_net" no llega hoy en params["image"].
-NO_SEED_IMAGE_HINTS = ("cirros-0.6.2-x86_64-disk.img","focal-server-cloudimg-amd64.img")
+NO_SEED_IMAGE_HINTS = ("cirros-0.6.2-x86_64-disk.img",)
 
 # QEMU abre el VNC en 5900 + display (-vnc <ip>:N). Es el puerto REAL de escucha.
 QEMU_VNC_BASE_PORT = 5900
@@ -178,7 +178,17 @@ def _ensure_seed(
     network = render_network_config(nics, cloud_init_net=True)
     # Solo red: user-data vacio (sin hostname ni credenciales) y meta-data
     # con el instance-id minimo que exige NoCloud.
-    user = "#cloud-config\n"
+    user = (
+        "#cloud-config\n"
+        "hostname: ubuntu\n"
+        "users:\n"
+        "  - default\n"
+        "ssh_pwauth: true\n"
+        "chpasswd:\n"
+        "  expire: false\n"
+        "  list: |\n"
+        "    ubuntu:ubuntu\n"
+    )
     meta = f"instance-id: {vm_id}\n"
     contents = {"network-config": network, "user-data": user, "meta-data": meta}
     digest = hashlib.sha256(

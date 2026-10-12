@@ -44,10 +44,10 @@ def render_network_config(
         mac, ip, nic_index = _required_nic_fields(nic)
         lines.extend(
             [
-                f"  eth{nic_index}:",
+                f"  ens{nic_index+3}:",
                 "    match:",
                 f"      macaddress: {_yaml_scalar(mac)}",
-                f"    set-name: eth{nic_index}",
+                f"    set-name: ens{nic_index+3}",
                 "    dhcp4: false",
                 "    addresses:",
                 f"      - {_yaml_scalar(ip)}",

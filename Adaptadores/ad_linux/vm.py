@@ -9,13 +9,22 @@ from pathlib import Path
 from contracts.adapter import AdapterActionInput
 
 from . import config, host
-from .cloudinit import render_meta_data, render_network_config, render_user_data
+from .cloudinit import render_network_config
 from .errors import NonRetryableError, RetryableError
+
+# Flag fijo: False = ninguna VM usa seed cloud-init.
+# True = se genera el ISO "cidata" SOLO con network-config (sin hostname ni
+# credenciales; cada imagen conserva sus usuarios por defecto) y solo para
+# imagenes que lo soportan (ver _seed_enabled).
+USE_SEED = True
+# Imagenes sin cloud-init real: no reciben seed. Se detectan por el nombre del
+# archivo base, porque "cloud_init_net" no llega hoy en params["image"].
+NO_SEED_IMAGE_HINTS = ("cirros-0.6.2-x86_64-disk.img","focal-server-cloudimg-amd64.img")
 
 # QEMU abre el VNC en 5900 + display (-vnc <ip>:N). Es el puerto REAL de escucha.
 QEMU_VNC_BASE_PORT = 5900
 # Valor que se reporta como fact "vnc_port" (convención del proyecto, no es
-# donde escucha QEMU). TODO: documentar qué representa (proxy/DNAT de consola).
+# donde escucha QEMU).
 VNC_FACT_BASE_PORT = 30000
 START_TIMEOUT_S = 10
 ERR_DETAIL_MAX = 500
@@ -64,7 +73,10 @@ def create_vm(request: AdapterActionInput) -> dict:
         raise NonRetryableError("BASE_MISSING")
     base = str(config.STORAGE_ROOT / "base" / str(base_ref))
     overlay = str(config.STORAGE_ROOT / "overlay" / f"{vm_id}.qcow2")
-    seed = str(config.STORAGE_ROOT / "seeds" / f"{vm_id}.iso")
+    # Ruta del seed solo si aplica a esta VM; sin seed no hay ISO ni hash.
+    use_seed = _seed_enabled(params, base_ref)
+    print(f"use_seed={use_seed}")
+    seed = str(config.STORAGE_ROOT / "seeds" / f"{vm_id}.iso") if use_seed else None
 
     # 2. Ya corre: éxito sin tocar overlay, seed ni taps (QEMU los tiene abiertos).
     if _running(address, vm_name):
@@ -73,7 +85,7 @@ def create_vm(request: AdapterActionInput) -> dict:
             "vnc_port": _vnc_port(vnc_display),
             "state": "RUNNING",
             "overlay_ref": overlay,
-            "seed_sha256": _stored_seed_hash(address, seed),
+            "seed_sha256": _stored_seed_hash(address, seed) if seed else None,
             "_already_existed": True,
         }
 
@@ -82,13 +94,9 @@ def create_vm(request: AdapterActionInput) -> dict:
     if not _exists(address, base):
         raise NonRetryableError("BASE_MISSING")
     _ensure_overlay(address, base, overlay, disk_mb)
-    seed_hash = _ensure_seed(
-        address,
-        seed,
-        params,
-        vm_id,
-        str(params.get("hostname") or vm_name),
-    )
+    seed_hash = None
+    if seed:
+        seed_hash = _ensure_seed(address, seed, params, vm_id)
     _ensure_taps(address, params.get("nics") or [])
 
     # 4. Arrancar y verificar.
@@ -147,18 +155,31 @@ def _ensure_overlay(address: str, base: str, overlay: str, disk_mb: int) -> None
     )
 
 
+def _seed_enabled(params: dict, base_ref) -> bool:
+    """El seed (solo network-config) aplica si hay NICs y la imagen lo soporta."""
+    if not USE_SEED:
+        return False
+    if not (params.get("nics") or []):
+        return False
+    image = params.get("image") or {}
+    if image.get("cloud_init_net") is False:
+        return False
+    name = str(base_ref).lower()
+    return not any(hint in name for hint in NO_SEED_IMAGE_HINTS)
+
+
 def _ensure_seed(
     address: str,
     seed: str,
     params: dict,
     vm_id: str,
-    hostname: str,
 ) -> str:
     nics = params.get("nics") or []
-    image = params.get("image") or {}
-    network = render_network_config(nics, cloud_init_net=image.get("cloud_init_net", True))
-    user = render_user_data(hostname)
-    meta = render_meta_data(vm_id, hostname)
+    network = render_network_config(nics, cloud_init_net=True)
+    # Solo red: user-data vacio (sin hostname ni credenciales) y meta-data
+    # con el instance-id minimo que exige NoCloud.
+    user = "#cloud-config\n"
+    meta = f"instance-id: {vm_id}\n"
     contents = {"network-config": network, "user-data": user, "meta-data": meta}
     digest = hashlib.sha256(
         json.dumps(contents, sort_keys=True).encode("utf-8")
@@ -225,7 +246,7 @@ def _start_qemu(
     address: str,
     vm_name: str,
     overlay: str,
-    seed: str,
+    seed: str | None,
     params: dict,
     management_ip: str,
     ram_mb: int,
@@ -236,8 +257,9 @@ def _start_qemu(
         "qemu-system-x86_64", "-name", vm_name, "-enable-kvm", "-cpu", "host",
         "-m", str(ram_mb), "-smp", str(vcpus),
         "-drive", f"file={overlay},format=qcow2,if=virtio",
-        "-drive", f"file={seed},format=raw,media=cdrom,readonly=on",
     ]
+    if seed:
+        args.extend(["-drive", f"file={seed},format=raw,media=cdrom,readonly=on"])
     for nic in nics:
         port_id = str(nic.get("port_id") or nic.get("id"))
         tap_name = "tp-" + hashlib.sha1(port_id.encode()).hexdigest()[:10]

@@ -1,9 +1,9 @@
-@baseUrl = https://localhost:8443
-@consumerCodigo = 20260001
+@baseUrl = https://localhost:3000
+@consumerCodigo = 20260002
 @consumerPassword = consumidor
 @operatorCodigo = operador
 @operatorPassword = operador
-@runId = {{$guid}}
+# @runId = {{$guid}}
 
 @consumerToken = {{consumerLogin.response.body.$.access_token}}
 @consumerRefreshToken = {{consumerLogin.response.body.$.refresh_token}}
@@ -51,72 +51,72 @@ Authorization: Bearer {{consumerToken}}
 Content-Type: application/json
 
 {
-  "name": "deploy-approval-{{runId}}",
+  "name": "deploy-approval-test",
   "zona_id": 1,
   "spec": {
     "schema_version": 1,
     "vms": [
       {
-        "name": "vm1-{{runId}}",
-        "flavor": "small-v1",
+        "name": "vm1",
+        "flavor": "verde-ex1",
         "image": "Ubuntu",
         "public": true
       },
       {
-        "name": "vm2-{{runId}}",
-        "flavor": "micro-v1",
+        "name": "vm2",
+        "flavor": "rojo-ex1",
         "image": "Cirros",
         "public": false
       },
       {
-        "name": "vm3-{{runId}}",
-        "flavor": "small-v1",
+        "name": "vm3",
+        "flavor": "verde-ex1",
         "image": "Ubuntu",
         "public": true
       },
       {
-        "name": "vm4-{{runId}}",
-        "flavor": "small-v1",
+        "name": "vm4",
+        "flavor": "verde-ex1",
         "image": "Ubuntu",
         "public": false
       },
       {
-        "name": "vm5-{{runId}}",
-        "flavor": "small-v1",
+        "name": "vm5",
+        "flavor": "verde-ex1",
         "image": "Ubuntu",
         "public": false
       },
       {
-        "name": "vm6-{{runId}}",
-        "flavor": "micro-v1",
+        "name": "vm6",
+        "flavor": "rojo-ex1",
         "image": "Cirros",
         "public": false
       }
     ],
     "links": [
       {
-        "name": "l-vm6-vm5-{{runId}}",
-        "endpoints": ["vm6-{{runId}}", "vm5-{{runId}}"]
+        "name": "l-vm6-vm5",
+        "endpoints": ["vm6", "vm5"]
       },
       {
-        "name": "l-vm5-vm4-{{runId}}",
-        "endpoints": ["vm5-{{runId}}", "vm4-{{runId}}"]
+        "name": "l-vm5-vm4",
+        "endpoints": ["vm5", "vm4"]
       },
       {
-        "name": "l-vm4-vm1-{{runId}}",
-        "endpoints": ["vm4-{{runId}}", "vm1-{{runId}}"]
+        "name": "l-vm4-vm1",
+        "endpoints": ["vm4", "vm1"]
       },
       {
-        "name": "l-vm4-vm3-{{runId}}",
-        "endpoints": ["vm4-{{runId}}", "vm3-{{runId}}"]
+        "name": "l-vm4-vm3",
+        "endpoints": ["vm4", "vm3"]
       },
       {
-        "name": "l-vm1-vm2-{{runId}}",
-        "endpoints": ["vm1-{{runId}}", "vm2-{{runId}}"]
+        "name": "l-vm1-vm2",
+        "endpoints": ["vm1", "vm2"]
       },
       {
-        "name": "l-vm3-vm2-{{runId}}",
-        "endpoints": ["vm3-{{runId}}", "vm2-{{runId}}"]
+        "name": "l-vm3-vm2",
+        "endpoints": ["vm3", "vm2"]
       }
     ]
   }

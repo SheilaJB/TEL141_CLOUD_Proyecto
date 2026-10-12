@@ -96,7 +96,7 @@ def create_vm(request: AdapterActionInput) -> dict:
     _ensure_overlay(address, base, overlay, disk_mb)
     seed_hash = None
     if seed:
-        seed_hash = _ensure_seed(address, seed, params, vm_id)
+        seed_hash = _ensure_seed(address, seed, params, vm_id, hostname=params.get("hostname"))
     _ensure_taps(address, params.get("nics") or [])
 
     # 4. Arrancar y verificar.
@@ -173,14 +173,13 @@ def _ensure_seed(
     seed: str,
     params: dict,
     vm_id: str,
+    hostname: str | None = "ubuntu",
 ) -> str:
     nics = params.get("nics") or []
     network = render_network_config(nics, cloud_init_net=True)
-    # Solo red: user-data vacio (sin hostname ni credenciales) y meta-data
-    # con el instance-id minimo que exige NoCloud.
     user = (
         "#cloud-config\n"
-        "hostname: ubuntu\n"
+        f"hostname: {hostname}\n"
         "users:\n"
         "  - default\n"
         "ssh_pwauth: true\n"

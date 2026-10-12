@@ -215,6 +215,7 @@ class DeploymentActivities:
                             ),
                         )
                     ]
+                    params["hostname"] = params["hostname"] if "hostname" in params else "ubuntu"
                 enriched = action.model_copy(
                     update={"params": params, "frozen": False}
                 )

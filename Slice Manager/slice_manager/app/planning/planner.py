@@ -284,6 +284,7 @@ def _build_plan(
                 target=ActionTarget(kind=TargetKind.VM, id=node_id),
                 params={
                     "name": vm.name,
+                    "hostname": vm.name,
                     "image": {"reference": image.reference},
                     "flavor": {
                         "name": flavor.name,

@@ -12,6 +12,14 @@ from . import config, host
 from .cloudinit import render_meta_data, render_network_config, render_user_data
 from .errors import NonRetryableError, RetryableError
 
+# QEMU abre el VNC en 5900 + display (-vnc <ip>:N). Es el puerto REAL de escucha.
+QEMU_VNC_BASE_PORT = 5900
+# Valor que se reporta como fact "vnc_port" (convención del proyecto, no es
+# donde escucha QEMU). TODO: documentar qué representa (proxy/DNAT de consola).
+VNC_FACT_BASE_PORT = 30000
+START_TIMEOUT_S = 10
+ERR_DETAIL_MAX = 500
+
 
 def _param(request: AdapterActionInput, name: str):
     return request.action.params.get(name)
@@ -29,16 +37,19 @@ def _run_path(name: str) -> str:
 
 def create_vm(request: AdapterActionInput) -> dict:
     target = _require_host(request)
+    address = target.management_ip
     params = request.action.params
     vm_id = str(request.action.target.id)
     vm_name = "vm-" + vm_id[:8]
     image = params.get("image") or {}
     flavor = params.get("flavor") or {}
     ## ---
-    print(f"Creating VM {vm_name} on host {target.management_ip} with params: {params}")
+    print(f"Creating VM {vm_name} on host {address} with params: {params}")
     print(f"Image: {image}. Base path: {config.STORAGE_ROOT / 'base' / str(image.get('reference'))}")
     print(f"Flavor details - RAM: {flavor.get('ram_mb')} MB, vCPUs: {flavor.get('vcpu')}, Disk: {flavor.get('disk_mb')} MB")
     ## ---
+
+    # 1. Validar params (sin tocar el host).
     try:
         vnc_display = int(params["vnc_display"])
         ram_mb = int(flavor["ram_mb"])
@@ -54,40 +65,37 @@ def create_vm(request: AdapterActionInput) -> dict:
     base = str(config.STORAGE_ROOT / "base" / str(base_ref))
     overlay = str(config.STORAGE_ROOT / "overlay" / f"{vm_id}.qcow2")
     seed = str(config.STORAGE_ROOT / "seeds" / f"{vm_id}.iso")
-    if not _exists(target.management_ip, base):
+
+    # 2. Ya corre: éxito sin tocar overlay, seed ni taps (QEMU los tiene abiertos).
+    if _running(address, vm_name):
+        return {
+            "pid": _pid(address, vm_name),
+            "vnc_port": _vnc_port(vnc_display),
+            "state": "RUNNING",
+            "overlay_ref": overlay,
+            "seed_sha256": _stored_seed_hash(address, seed),
+            "_already_existed": True,
+        }
+
+    # 3. No corre (VM nueva o intento previo a medias): crear lo que falte
+    #    y reutilizar lo que exista.
+    if not _exists(address, base):
         raise NonRetryableError("BASE_MISSING")
-    _ensure_overlay(target.management_ip, base, overlay, disk_mb)
+    _ensure_overlay(address, base, overlay, disk_mb)
     seed_hash = _ensure_seed(
-        target.management_ip,
+        address,
         seed,
         params,
         vm_id,
         str(params.get("hostname") or vm_name),
     )
-    if _running(target.management_ip, vm_name):
-        return {
-            "pid": _pid(target.management_ip, vm_name),
-            "vnc_port": _vnc_port(vnc_display),
-            "state": "RUNNING",
-            "overlay_ref": overlay,
-            "seed_sha256": seed_hash,
-            "_already_existed": True,
-        }
-    _ensure_taps(target.management_ip, params.get("nics") or [])
-    _start_qemu(
-        target.management_ip,
-        vm_name,
-        overlay,
-        seed,
-        params,
-        target.management_ip,
-        ram_mb,
-        vcpus,
-    )
-    if not _wait_for_start(target.management_ip, vm_name, vnc_display):
-        raise RetryableError("QEMU_START_FAILED")
+    _ensure_taps(address, params.get("nics") or [])
+
+    # 4. Arrancar y verificar.
+    _start_qemu(address, vm_name, overlay, seed, params, address, ram_mb, vcpus)
+    _wait_for_start(address, vm_name, vnc_display)
     return {
-        "pid": _pid(target.management_ip, vm_name),
+        "pid": _pid(address, vm_name),
         "vnc_port": _vnc_port(vnc_display),
         "state": "RUNNING",
         "overlay_ref": overlay,
@@ -113,8 +121,12 @@ def _ensure_overlay(address: str, base: str, overlay: str, disk_mb: int) -> None
         ],
     )
     if _exists(address, overlay):
+        # --force-share: no falla si otro proceso tiene el overlay abierto.
         info = json.loads(
-            host.run(address, ["qemu-img", "info", "--output=json", overlay])
+            host.run(
+                address,
+                ["qemu-img", "info", "--force-share", "--output=json", overlay],
+            )
         )
         if info.get("backing-filename") != base:
             raise NonRetryableError("OVERLAY_CONFLICT")
@@ -122,7 +134,10 @@ def _ensure_overlay(address: str, base: str, overlay: str, disk_mb: int) -> None
             raise NonRetryableError("DISK_TOO_SMALL")
         return
     base_info = json.loads(
-        host.run(address, ["qemu-img", "info", "--output=json", base])
+        host.run(
+            address,
+            ["qemu-img", "info", "--force-share", "--output=json", base],
+        )
     )
     if int(base_info.get("virtual-size", 0)) > disk_mb * 1024 * 1024:
         raise NonRetryableError("DISK_TOO_SMALL")
@@ -198,6 +213,14 @@ def _ensure_seed(
     return observed
 
 
+def _stored_seed_hash(address: str, seed: str) -> str | None:
+    """Hash guardado del seed (best effort) para una VM que ya corre."""
+    try:
+        return host.run(address, ["cat", seed + ".sha256"]) or None
+    except RuntimeError:
+        return None
+
+
 def _start_qemu(
     address: str,
     vm_name: str,
@@ -230,7 +253,7 @@ def _start_qemu(
     args.extend(
         [
             "-vnc",
-            f"{management_ip}:{params['vnc_display']}",
+            f"0.0.0.0:{params['vnc_display']}",
             "-vga",
             "std",
             "-daemonize",
@@ -238,25 +261,63 @@ def _start_qemu(
             _run_path(vm_name),
         ]
     )
-    host.run(address, args)
+    print(f"Starting QEMU for {vm_name}: {' '.join(args)}")
+    try:
+        host.run(address, args)
+    except (RetryableError, NonRetryableError):
+        raise  # SSH caído, timeout, etc.: se propagan tal cual
+    except RuntimeError as exc:
+        _raise_start_error(vm_name, str(exc))
 
 
-def _wait_for_start(address: str, vm_name: str, display: int) -> bool:
-    deadline = time.monotonic() + 10
-    expected_port = 30000 + display
+def _raise_start_error(vm_name: str, stderr: str) -> None:
+    """Clasifica el stderr de QEMU. Config del entorno = no reintentable."""
+    detail = stderr.strip()[:ERR_DETAIL_MAX]
+    print(f"QEMU start failed for {vm_name}: {detail}")
+    low = detail.lower()
+    if "could not access kvm" in low:
+        raise NonRetryableError("KVM_UNAVAILABLE")
+    if "command not found" in low or "qemu-system-x86_64: no such file" in low:
+        raise NonRetryableError("QEMU_BINARY_MISSING")
+    if "address already in use" in low or "failed to bind" in low:
+        raise NonRetryableError("VNC_PORT_IN_USE")
+    if "device or resource busy" in low:
+        raise NonRetryableError("TAP_BUSY")
+    raise RetryableError("QEMU_START_FAILED", detail)
+
+
+def _wait_for_start(address: str, vm_name: str, display: int) -> None:
+    """Espera proceso vivo y VNC escuchando en 5900+display; lanza si no."""
+    deadline = time.monotonic() + START_TIMEOUT_S
+    port = QEMU_VNC_BASE_PORT + display
+    alive = False
     while time.monotonic() < deadline:
         if _running(address, vm_name):
-            sockets = host.run(address, ["ss", "-ltn"])
-            if f":{expected_port} " in sockets or f":{expected_port}\n" in sockets:
-                return True
+            alive = True
+            if _listening(address, port):
+                return
         time.sleep(0.5)
+    if alive:
+        raise RetryableError("VNC_NOT_LISTENING", f"port {port}")
+    raise RetryableError("QEMU_START_FAILED", f"{vm_name} is not running")
+
+
+def _listening(address: str, port: int) -> bool:
+    for line in host.run(address, ["ss", "-ltn"]).splitlines():
+        cols = line.split()
+        if len(cols) >= 4 and cols[3].endswith(f":{port}"):
+            return True
     return False
 
 
 def _running(address: str, vm_name: str) -> bool:
+    """Pidfile existe, el proceso vive y es esta VM (evita pid reciclado)."""
     try:
-        pid = host.run(address, ["cat", _run_path(vm_name)])
+        pid = host.run(address, ["cat", _run_path(vm_name)]).strip()
+        if not pid.isdigit():
+            return False
         host.run(address, ["kill", "-0", pid])
+        host.run(address, ["grep", "-qa", vm_name, f"/proc/{pid}/cmdline"])
     except RuntimeError:
         return False
     return True
@@ -267,7 +328,7 @@ def _pid(address: str, vm_name: str) -> int:
 
 
 def _vnc_port(display: int) -> int:
-    return 30000 + display
+    return VNC_FACT_BASE_PORT + display
 
 
 def _ensure_taps(address: str, nics: list[dict]) -> None:

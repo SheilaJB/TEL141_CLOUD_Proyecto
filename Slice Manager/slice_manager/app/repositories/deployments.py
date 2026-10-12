@@ -28,6 +28,16 @@ from slice_manager.app.domain.placement_simulator import (
 )
 from slice_manager.app.planning.planner import CatalogFlavor, CatalogImage
 
+# Columnas de facts que el DDL actual puede persistir. El resto se reporta como warning.
+_SUPPORTED_ACTION_FACTS: dict[ActionOp, frozenset[str]] = {
+    ActionOp.CREATE_VM: frozenset({"pid"}),
+    ActionOp.ATTACH_PORT: frozenset({"mac", "ip"}),
+    ActionOp.CREATE_LINK: frozenset(),
+    ActionOp.DELETE_VM: frozenset(),
+    ActionOp.DELETE_LINK: frozenset(),
+    ActionOp.DETACH_PORT: frozenset(),
+}
+
 
 class DeploymentRepository:
     async def lock_initial_deploy_context(
@@ -813,9 +823,7 @@ class DeploymentRepository:
         )
         if deployment is None:
             raise LookupError(f"deployment {deployment_id} was not found")
-        warnings = {
-            "The current DDL has no deployment.action_status column; per-action statuses are not persisted."
-        }
+        warnings: set[str] = set()
         persisted_count = 0
         for result in facts.actions:
             persisted = await self._apply_action_fact(
@@ -824,20 +832,12 @@ class DeploymentRepository:
                 result=result,
             )
             persisted_count += int(persisted)
-            if result.op == ActionOp.CREATE_LINK:
+            unsupported = sorted(set(result.facts) - _SUPPORTED_ACTION_FACTS.get(result.op, frozenset()))
+            if unsupported:
                 warnings.add(
-                    "The current DDL has no slice_enlace execution state column; link action status is not persisted."
+                    f"Unsupported facts for {result.op.value} action {result.action_id} were not persisted: "
+                    f"{', '.join(unsupported)}."
                 )
-            if result.op in {ActionOp.CREATE_VM, ActionOp.CREATE_LINK} and result.facts:
-                warnings.add(
-                    f"Facts for {result.op.value} action {result.action_id} are not persisted because the current DDL has no corresponding facts columns."
-                )
-            elif result.op == ActionOp.ATTACH_PORT:
-                unsupported = sorted(set(result.facts) - {"mac", "ip", "vlan_tag", "ns"})
-                if unsupported:
-                    warnings.add(
-                        f"Unsupported port facts for action {result.action_id} were not persisted: {', '.join(unsupported)}."
-                    )
         return RoundFactsResult(
             event_id=facts.event_id,
             persisted_action_count=persisted_count,
@@ -852,15 +852,18 @@ class DeploymentRepository:
         result: ActionFact,
     ) -> bool:
         if result.op == ActionOp.CREATE_VM:
-            state = "RUNNING" if result.succeeded else "FAILED"
+            pid = result.facts.get("pid")
             status = await connection.execute(
                 """
-                UPDATE slices.slice_nodo SET estado_nodo = $3
+                UPDATE slices.slice_nodo
+                SET estado_nodo = $3,
+                    pid = COALESCE($4::int, pid)
                 WHERE id = $1 AND slice_id = $2
                 """,
                 result.target_id,
                 slice_id,
-                state,
+                "RUNNING" if result.succeeded else "FAILED",
+                pid,
             )
             if not status.endswith(" 1"):
                 raise LookupError(f"node {result.target_id} was not found for action facts")
@@ -877,21 +880,55 @@ class DeploymentRepository:
             if not status.endswith(" 1"):
                 raise LookupError(f"node {result.target_id} was not found for action facts")
             return True
-        elif result.op == ActionOp.ATTACH_PORT and result.succeeded:
+        elif result.op == ActionOp.CREATE_LINK:
+            status = await connection.execute(
+                """
+                UPDATE slices.slice_enlace SET estado = $3
+                WHERE id = $1 AND slice_id = $2
+                """,
+                result.target_id,
+                slice_id,
+                "CREATED" if result.succeeded else "FAILED",
+            )
+            if not status.endswith(" 1"):
+                raise LookupError(f"link {result.target_id} was not found for action facts")
+            return True
+        elif result.op == ActionOp.DELETE_LINK:
+            status = await connection.execute(
+                """
+                UPDATE slices.slice_enlace SET estado = 'DELETED'
+                WHERE id = $1 AND slice_id = $2
+                """,
+                result.target_id,
+                slice_id,
+            )
+            if not status.endswith(" 1"):
+                raise LookupError(f"link {result.target_id} was not found for action facts")
+            return True
+        elif result.op == ActionOp.ATTACH_PORT:
             status = await connection.execute(
                 """
                 UPDATE slices.slice_enlace_puerto
-                SET                 mac = COALESCE($2::text::macaddr, mac),
-                ip = COALESCE($3::text::inet, ip),
-                    vlan_tag = COALESCE($4::integer, vlan_tag),
-                    ns = COALESCE($5::text, ns)
+                SET estado = $2,
+                    mac = COALESCE($3::text::macaddr, mac),
+                    ip  = COALESCE($4::text::inet, ip)
                 WHERE id = $1
                 """,
                 result.target_id,
+                "ATTACHED" if result.succeeded else "FAILED",
                 result.facts.get("mac"),
                 result.facts.get("ip"),
-                result.facts.get("vlan_tag"),
-                result.facts.get("ns"),
+            )
+            if not status.endswith(" 1"):
+                raise LookupError(f"port {result.target_id} was not found for action facts")
+            return True
+        elif result.op == ActionOp.DETACH_PORT:
+            status = await connection.execute(
+                """
+                UPDATE slices.slice_enlace_puerto SET estado = 'DELETED'
+                WHERE id = $1
+                """,
+                result.target_id,
             )
             if not status.endswith(" 1"):
                 raise LookupError(f"port {result.target_id} was not found for action facts")

@@ -9,6 +9,8 @@ import asyncpg
 from contracts.plan import ActionOp, DeploymentPlan
 from contracts.placement import (
     PlacementAllocation,
+    PlacementReleaseRequest,
+    PlacementReleaseResponse,
     PlacementReserveRequest,
     PlacementReserveResponse,
     PlacementRollbackRequest,
@@ -26,6 +28,7 @@ from slice_manager.app.domain.placement_simulator import (
     ServerCapacity,
     simulate_deploy_placement,
 )
+from slice_manager.app.planning.destroy_planner import DestroyLink, DestroyNode
 from slice_manager.app.planning.planner import CatalogFlavor, CatalogImage
 
 # Columnas de facts que el DDL actual puede persistir. El resto se reporta como warning.
@@ -36,6 +39,7 @@ _SUPPORTED_ACTION_FACTS: dict[ActionOp, frozenset[str]] = {
     ActionOp.DELETE_VM: frozenset(),
     ActionOp.DELETE_LINK: frozenset(),
     ActionOp.DETACH_PORT: frozenset(),
+    ActionOp.DESTROY_SLICE_HOST: frozenset({"destroyed_vms", "destroyed_bridge"}),
 }
 
 
@@ -113,7 +117,7 @@ class DeploymentRepository:
     ) -> list[asyncpg.Record]:
         return await connection.fetch(
             """
-            SELECT id, workflow_id
+            SELECT id, workflow_id, tipo
             FROM slices.deployment
             WHERE estado = 'PENDING' AND workflow_id IS NULL
             ORDER BY id
@@ -933,6 +937,20 @@ class DeploymentRepository:
             if not status.endswith(" 1"):
                 raise LookupError(f"port {result.target_id} was not found for action facts")
             return True
+        elif result.op == ActionOp.DESTROY_SLICE_HOST:
+            if not result.succeeded:
+                return False
+            destroyed = [UUID(str(item)) for item in result.facts.get("destroyed_vms", [])]
+            if destroyed:
+                await connection.execute(
+                    """
+                    UPDATE slices.slice_nodo SET estado_nodo = 'DELETED'
+                    WHERE slice_id = $1 AND id = ANY($2::uuid[])
+                    """,
+                    slice_id,
+                    destroyed,
+                )
+            return True
         return False
 
     async def finish_deployment(
@@ -985,6 +1003,14 @@ class DeploymentRepository:
         )
         target_version_id = row["target_version_id"]
         slice_id = row["slice_id"]
+        if row["tipo"] == "DESTROY":
+            await self._finish_destroy(
+                connection,
+                slice_id=slice_id,
+                version_id=target_version_id,
+                outcome=finish.outcome,
+            )
+            return
         plan = DeploymentPlan.model_validate_json(row["plan"])
         node_ids = [allocation.node_id for allocation in plan.reservation.allocate]
 
@@ -1115,6 +1141,323 @@ class DeploymentRepository:
             """,
             slice_id,
         )
+
+    # ------------------------------------------------------------------
+    # DESTROY
+    # ------------------------------------------------------------------
+
+    async def lock_destroy_context(
+        self, connection: asyncpg.Connection, slice_id: int
+    ) -> asyncpg.Record | None:
+        """Bloquea el slice y resuelve que version se esta destruyendo.
+
+        Si el slice no tiene version activa (p. ej. un Deploy que termino
+        FAILED la deja en NULL) se usa la version del ultimo deployment.
+        """
+        return await connection.fetchrow(
+            """
+            SELECT s.id AS slice_id, s.usuario_id, s.estado AS slice_state,
+                   COALESCE(
+                       s.version_activa_id,
+                       (
+                           SELECT d.target_version_id
+                           FROM slices.deployment AS d
+                           WHERE d.slice_id = s.id
+                             AND d.target_version_id IS NOT NULL
+                           ORDER BY d.id DESC
+                           LIMIT 1
+                       )
+                   ) AS version_id
+            FROM slices.slice AS s
+            WHERE s.id = $1
+            FOR UPDATE OF s
+            """,
+            slice_id,
+        )
+
+    async def load_destroy_inventory(
+        self, connection: asyncpg.Connection, slice_id: int
+    ) -> tuple[list[DestroyNode], list[DestroyLink]]:
+        node_rows = await connection.fetch(
+            """
+            SELECT n.id AS node_id,
+                   COALESCE(n.server_id, r.servidor_id) AS server_id
+            FROM slices.slice_nodo AS n
+            LEFT JOIN LATERAL (
+                SELECT rn.servidor_id
+                FROM slices.reserva_nodo AS rn
+                WHERE rn.nodo_id = n.id AND rn.estado = 'RESERVED'
+                LIMIT 1
+            ) AS r ON TRUE
+            WHERE n.slice_id = $1 AND n.estado_nodo <> 'DELETED'
+            ORDER BY n.id
+            """,
+            slice_id,
+        )
+        port_rows = await connection.fetch(
+            """
+            SELECT p.id AS port_id, p.nodo_id
+            FROM slices.slice_enlace_puerto AS p
+            JOIN slices.slice_enlace AS e ON e.id = p.enlace_id
+            WHERE e.slice_id = $1 AND p.estado <> 'DELETED'
+            ORDER BY p.id
+            """,
+            slice_id,
+        )
+        link_rows = await connection.fetch(
+            """
+            SELECT id FROM slices.slice_enlace
+            WHERE slice_id = $1 AND estado <> 'DELETED'
+            ORDER BY id
+            """,
+            slice_id,
+        )
+        ports_by_node: dict[UUID, list[UUID]] = {}
+        for item in port_rows:
+            ports_by_node.setdefault(item["nodo_id"], []).append(item["port_id"])
+        nodes = [
+            DestroyNode(
+                node_id=item["node_id"],
+                server_id=item["server_id"],
+                port_ids=tuple(ports_by_node.get(item["node_id"], [])),
+            )
+            for item in node_rows
+        ]
+        links = [DestroyLink(link_id=item["id"]) for item in link_rows]
+        return nodes, links
+
+    async def create_destroy_deployment(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        deployment_id: int,
+        slice_id: int,
+        version_id: int,
+        requester_id: int,
+        plan: DeploymentPlan,
+    ) -> str:
+        workflow_id = f"destroy-{deployment_id}"
+        await connection.execute(
+            """
+            INSERT INTO slices.deployment
+                (id, slice_id, origin_version_id, target_version_id, tipo,
+                 estado, plan, solicitado_por, workflow_id)
+            VALUES ($1, $2, $3, $3, 'DESTROY', 'PENDING', $4::jsonb, $5, $6)
+            """,
+            deployment_id,
+            slice_id,
+            version_id,
+            plan.model_dump_json(),
+            requester_id,
+            workflow_id,
+        )
+        # Destruir no consume recursos: se aprueba automaticamente.
+        # start_deployment exige una fila de aprobacion APPROVED.
+        await connection.execute(
+            """
+            INSERT INTO slices.solicitud_aprobacion
+                (deployment_id, usuario_id, estado, motivo)
+            VALUES ($1, $2, 'APPROVED', 'Destroy aprobado automaticamente')
+            """,
+            deployment_id,
+            requester_id,
+        )
+        await connection.execute(
+            """
+            UPDATE slices.slice
+            SET estado = 'UPDATING', fecha_modificacion = now()
+            WHERE id = $1
+            """,
+            slice_id,
+        )
+        return workflow_id
+
+    async def eliminate_undeployed_slice(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        deployment_id: int,
+        slice_id: int,
+        requester_id: int,
+    ) -> None:
+        """Slice que nunca se desplego: no hay nada fisico que borrar.
+
+        Se deja una fila DESTROY COMPLETED como registro de auditoria.
+        """
+        await connection.execute(
+            """
+            INSERT INTO slices.deployment
+                (id, slice_id, tipo, estado, solicitado_por, finished_at)
+            VALUES ($1, $2, 'DESTROY', 'COMPLETED', $3, now())
+            """,
+            deployment_id,
+            slice_id,
+            requester_id,
+        )
+        await connection.execute(
+            """
+            UPDATE slices.slice
+            SET estado = 'ELIMINATED', fecha_modificacion = now()
+            WHERE id = $1
+            """,
+            slice_id,
+        )
+
+    async def release_destroy_placement(
+        self,
+        connection: asyncpg.Connection,
+        request: PlacementReleaseRequest,
+    ) -> PlacementReleaseResponse:
+        """Liberacion REAL de reservas (solo con la bandera activada).
+
+        Misma logica que rollback_deployment_placement, pero por nodos del
+        plan DESTROY en vez de por createdby_deployment_id, porque las
+        reservas las creo un Deploy anterior. Cuando VM Placement termine su
+        migracion, este es el unico metodo que hay que reemplazar.
+        """
+        deployment = await connection.fetchrow(
+            "SELECT tipo, plan FROM slices.deployment WHERE id = $1 FOR UPDATE",
+            request.deployment_id,
+        )
+        if deployment is None:
+            raise LookupError(f"deployment {request.deployment_id} was not found")
+        if deployment["tipo"] != "DESTROY":
+            raise ValueError("placement release only applies to DESTROY deployments")
+        plan = DeploymentPlan.model_validate_json(deployment["plan"])
+        node_ids = [item.node_id for item in plan.reservation.release]
+        if not node_ids:
+            return PlacementReleaseResponse(deployment_id=request.deployment_id)
+
+        server_ids = await connection.fetch(
+            """
+            SELECT DISTINCT servidor_id
+            FROM slices.reserva_nodo
+            WHERE nodo_id = ANY($1::uuid[]) AND estado = 'RESERVED'
+            ORDER BY servidor_id
+            """,
+            node_ids,
+        )
+        await connection.fetch(
+            """
+            SELECT id FROM slices.servidor
+            WHERE id = ANY($1::integer[])
+            ORDER BY id
+            FOR UPDATE
+            """,
+            [item["servidor_id"] for item in server_ids],
+        )
+        released_rows = await connection.fetch(
+            """
+            UPDATE slices.reserva_nodo
+            SET estado = 'RELEASED', fecha_liberacion = now()
+            WHERE nodo_id = ANY($1::uuid[]) AND estado = 'RESERVED'
+            RETURNING nodo_id, servidor_id, recurso, cantidad_reservada
+            """,
+            node_ids,
+        )
+        released_by_server: dict[int, list[int]] = {}
+        resource_indexes = {"vcpu": 0, "vram_mb": 1, "vdisk_mb": 2}
+        for item in released_rows:
+            index = resource_indexes.get(item["recurso"])
+            if index is None:
+                raise ValueError(f"unsupported reserved resource {item['recurso']!r}")
+            amounts = released_by_server.setdefault(item["servidor_id"], [0, 0, 0])
+            amounts[index] += item["cantidad_reservada"]
+        for server_id, amounts in released_by_server.items():
+            result = await connection.execute(
+                """
+                UPDATE slices.servidor
+                SET vcpu_reserved = vcpu_reserved - $2,
+                    vram_mb_reserved = vram_mb_reserved - $3,
+                    vdisk_mb_reserved = vdisk_mb_reserved - $4
+                WHERE id = $1
+                  AND vcpu_reserved >= $2
+                  AND vram_mb_reserved >= $3
+                  AND vdisk_mb_reserved >= $4
+                """,
+                server_id,
+                *amounts,
+            )
+            if not result.endswith(" 1"):
+                raise ValueError("server reserved counters are inconsistent with Placement rows")
+        return PlacementReleaseResponse(
+            deployment_id=request.deployment_id,
+            released_nodes=len({item["nodo_id"] for item in released_rows}),
+        )
+
+    async def _finish_destroy(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        slice_id: int,
+        version_id: int | None,
+        outcome: DeploymentOutcome,
+    ) -> None:
+        if outcome == DeploymentOutcome.COMPLETED:
+            # Marcar DELETED/ELIMINATED basta para liberar VLAN, C-tag, CIDR,
+            # IP, MAC y display VNC: todos los indices unicos y las consultas
+            # de Network Manager y Computer Manager excluyen esas filas.
+            # Los valores se conservan como historial.
+            await connection.execute(
+                """
+                UPDATE slices.slice_enlace_puerto AS p
+                SET estado = 'DELETED'
+                FROM slices.slice_enlace AS e
+                WHERE p.enlace_id = e.id AND e.slice_id = $1
+                  AND p.estado <> 'DELETED'
+                """,
+                slice_id,
+            )
+            await connection.execute(
+                """
+                UPDATE slices.slice_enlace SET estado = 'DELETED'
+                WHERE slice_id = $1 AND estado <> 'DELETED'
+                """,
+                slice_id,
+            )
+            await connection.execute(
+                """
+                UPDATE slices.slice_nodo SET estado_nodo = 'DELETED'
+                WHERE slice_id = $1 AND estado_nodo <> 'DELETED'
+                """,
+                slice_id,
+            )
+            await connection.execute(
+                """
+                UPDATE slices.slice_version SET estado_version = 'ARCHIVED'
+                WHERE slice_id = $1 AND estado_version IN ('ACTIVE', 'INCONSISTENT')
+                """,
+                slice_id,
+            )
+            await connection.execute(
+                """
+                UPDATE slices.slice
+                SET estado = 'ELIMINATED', fecha_modificacion = now()
+                WHERE id = $1
+                """,
+                slice_id,
+            )
+        elif outcome == DeploymentOutcome.FAILED:
+            # Destruccion parcial: los nodos ya borrados quedaron DELETED via
+            # record_round_facts. El resto sigue vivo; se puede reintentar.
+            if version_id is not None:
+                await connection.execute(
+                    """
+                    UPDATE slices.slice_version SET estado_version = 'INCONSISTENT'
+                    WHERE id = $1
+                    """,
+                    version_id,
+                )
+            await connection.execute(
+                """
+                UPDATE slices.slice
+                SET estado = 'FAILED', fecha_modificacion = now()
+                WHERE id = $1
+                """,
+                slice_id,
+            )
+        else:
+            raise ValueError(f"DESTROY deployments cannot finish as {outcome.value}")
 
     async def decide_approval(
         self,

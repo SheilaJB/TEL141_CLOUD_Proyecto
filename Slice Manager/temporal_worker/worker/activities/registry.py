@@ -1,4 +1,6 @@
 from contracts.placement import (
+    PlacementReleaseRequest,
+    PlacementReleaseResponse,
     PlacementReserveRequest,
     PlacementResult,
     PlacementRollbackRequest,
@@ -29,6 +31,7 @@ from contracts.queues import (
     ACTIVITY_GET_APPROVAL_STATE,
     ACTIVITY_GET_PLAN,
     ACTIVITY_RECORD_ROUND_FACTS,
+    ACTIVITY_RELEASE_PLACEMENT,
     ACTIVITY_RESERVE_PLACEMENT,
     ACTIVITY_ROLLBACK_PLACEMENT,
     ACTIVITY_START_DEPLOYMENT,
@@ -337,6 +340,22 @@ class DeploymentActivities:
         )
         return await self._slice_manager.reserve_placement(
             PlacementReserveRequest(deployment_id=deployment_id)
+        )
+
+    @activity.defn(name=ACTIVITY_RELEASE_PLACEMENT)
+    async def release_placement(
+        self, deployment_id: int
+    ) -> PlacementReleaseResponse:
+        activity.logger.info(
+            "Requesting Placement release for destroy",
+            extra={
+                "deployment_id": deployment_id,
+                "workflow_id": activity.info().workflow_id,
+                "idempotency_key": f"{deployment_id}:release",
+            },
+        )
+        return await self._slice_manager.release_placement(
+            PlacementReleaseRequest(deployment_id=deployment_id)
         )
 
     @activity.defn(name=ACTIVITY_ROLLBACK_PLACEMENT)

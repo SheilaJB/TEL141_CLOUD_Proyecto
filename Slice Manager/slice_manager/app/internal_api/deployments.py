@@ -3,6 +3,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from contracts.placement import (
+    PlacementReleaseRequest,
+    PlacementReleaseResponse,
     PlacementReserveRequest,
     PlacementReserveResponse,
     PlacementRollbackRequest,
@@ -43,6 +45,17 @@ async def rollback_placement(
     service: Annotated[SliceService, Depends(get_slice_service)],
 ) -> PlacementRollbackResponse:
     return await service.rollback_placement(body)
+
+
+@router.post(
+    "/placements/release",
+    response_model=PlacementReleaseResponse,
+)
+async def release_placement(
+    body: PlacementReleaseRequest,
+    service: Annotated[SliceService, Depends(get_slice_service)],
+) -> PlacementReleaseResponse:
+    return await service.release_placement(body)
 
 
 @router.get("/deployments/{deployment_id}/plan", response_model=DeploymentContext)

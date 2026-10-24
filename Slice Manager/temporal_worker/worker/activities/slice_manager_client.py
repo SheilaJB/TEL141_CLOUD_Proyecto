@@ -5,6 +5,8 @@ from temporalio.exceptions import ApplicationError
 
 from contracts.errors import ErrorCode, ErrorResponse
 from contracts.placement import (
+    PlacementReleaseRequest,
+    PlacementReleaseResponse,
     PlacementReserveRequest,
     PlacementReserveResponse,
     PlacementRollbackRequest,
@@ -73,6 +75,16 @@ class SliceManagerClient:
             json=request.model_dump(mode="json"),
         )
         return PlacementRollbackResponse.model_validate(response)
+
+    async def release_placement(
+        self, request: PlacementReleaseRequest
+    ) -> PlacementReleaseResponse:
+        response = await self._request(
+            "POST",
+            "/internal/placements/release",
+            json=request.model_dump(mode="json"),
+        )
+        return PlacementReleaseResponse.model_validate(response)
 
     async def start_deployment(
         self, deployment_id: int, request: StartDeployment

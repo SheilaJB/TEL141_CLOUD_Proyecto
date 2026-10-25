@@ -1,10 +1,8 @@
-"""Plan DESTROY: funcion pura, sin acceso a BD, red ni disco.
+# El Plan de DESTROY
 
-Una sola ronda con una accion DESTROY_SLICE_HOST por servidor que aloja VMs
-del slice. La destruccion no es reversible, asi que point_of_no_return_round=1:
-si algo falla no se compensa, el deployment queda FAILED y se puede reintentar
-(destroy_slice_host es idempotente en el adaptador).
-"""
+#1 ronda con una accion (DESTROY_SLICE_HOST) x servidor 
+# La destruccion no es reversible
+
 
 import hashlib
 from dataclasses import dataclass, field
@@ -88,8 +86,7 @@ def build_destroy_plan(
     actions: list[Action] = []
     for index, server_id in enumerate(sorted(nodes_by_server), start=1):
         server_nodes = sorted(nodes_by_server[server_id], key=lambda item: str(item.node_id))
-        # Se borran TODOS los TAP: los privados quedan huerfanos al borrar
-        # br-sl-<slice>, y los publicos viven en br-provider.
+        # Se borran TODOS los TAP, los privados quedan huerfanos al borrar
         tap_names = sorted(
             {tap_name_for_port(port_id) for node in server_nodes for port_id in node.port_ids}
         )

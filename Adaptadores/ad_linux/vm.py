@@ -8,7 +8,7 @@ from pathlib import Path
 
 from contracts.adapter import AdapterActionInput
 
-from . import config, host
+from . import config, host, libvirt_vm
 from .cloudinit import render_network_config
 from .errors import NonRetryableError, RetryableError
 
@@ -100,7 +100,20 @@ def create_vm(request: AdapterActionInput) -> dict:
     _ensure_taps(address, params.get("nics") or [])
 
     # 4. Arrancar y verificar.
-    _start_qemu(address, vm_name, overlay, seed, params, address, ram_mb, vcpus)
+    if config.VM_BACKEND == "libvirt":
+        libvirt_vm.start(
+            address,
+            vm_name=vm_name,
+            vm_id=vm_id,
+            overlay=overlay,
+            seed=seed,
+            nics=params.get("nics") or [],
+            ram_mb=ram_mb,
+            vcpus=vcpus,
+            vnc_display=vnc_display,
+        )
+    else:
+        _start_qemu(address, vm_name, overlay, seed, params, address, ram_mb, vcpus)
     _wait_for_start(address, vm_name, vnc_display)
     return {
         "pid": _pid(address, vm_name),
@@ -343,6 +356,8 @@ def _listening(address: str, port: int) -> bool:
 
 def _running(address: str, vm_name: str) -> bool:
     """Pidfile existe, el proceso vive y es esta VM (evita pid reciclado)."""
+    if config.VM_BACKEND == "libvirt":
+        return libvirt_vm.running(address, vm_name)
     try:
         pid = host.run(address, ["cat", _run_path(vm_name)]).strip()
         if not pid.isdigit():
@@ -355,6 +370,8 @@ def _running(address: str, vm_name: str) -> bool:
 
 
 def _pid(address: str, vm_name: str) -> int:
+    if config.VM_BACKEND == "libvirt":
+        return libvirt_vm.pid(address, vm_name)
     return int(host.run(address, ["cat", _run_path(vm_name)]))
 
 

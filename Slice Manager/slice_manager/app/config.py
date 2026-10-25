@@ -25,9 +25,7 @@ class Settings(BaseSettings):
     )
     workflow_recovery_interval_seconds: int = Field(default=30, gt=0)
     capabilities_dir: Path | None = None
-    # Bandera temporal mientras VM Placement se migra. En false, el Destroy
-    # NO libera reserva_nodo ni servidor.*_reserved: solo lo simula y lo loguea.
-    # Env: ORCHESTRATOR_PLACEMENT_RELEASE_ENABLED
+    # Bandera temporal En false, el Destroy
     placement_release_enabled: bool = False
 
 

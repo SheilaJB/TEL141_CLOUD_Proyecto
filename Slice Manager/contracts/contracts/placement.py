@@ -62,7 +62,7 @@ class PlacementRollbackResponse(ContractModel):
 
 
 class PlacementReleaseRequest(ContractModel):
-    """Libera las reservas de todos los nodos de un deployment DESTROY."""
+    # Libera las reservas de todos los nodos (DESTROY)
 
     deployment_id: int = Field(gt=0)
 
@@ -71,6 +71,5 @@ class PlacementReleaseResponse(ContractModel):
     deployment_id: int = Field(gt=0)
     status: PlacementStatus = PlacementStatus.RELEASED
     released_nodes: int = Field(default=0, ge=0)
-    # True cuando ORCHESTRATOR_PLACEMENT_RELEASE_ENABLED=false: no se toco
-    # reserva_nodo ni los contadores de servidor (bandera temporal).
+    #(bandera temporal)
     simulated: bool = False

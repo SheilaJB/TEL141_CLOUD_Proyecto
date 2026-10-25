@@ -6,11 +6,13 @@ verifico que su proceso QEMU ya no existe; si sobrevive se lanza un error
 reintentable y el Destroy no marca nada como borrado.
 """
 
+import re
+import shlex
 import time
 
 from contracts.adapter import AdapterActionInput
 
-from . import config, host
+from . import config, host, libvirt_vm
 from .errors import NonRetryableError, RetryableError
 from .vm import _run_path
 
@@ -32,12 +34,19 @@ def _qemu_pids(address: str, vm_name: str) -> list[str]:
     except RuntimeError:
         pass
     try:
-        # El espacio final evita que vm-1234abcd coincida con vm-1234abcdX.
-        found = host.run(address, ["pgrep", "-f", f"qemu-system-x86_64 -name {vm_name} "])
+        found = host.run(address, ["pgrep", "-f", shlex.quote(_cmdline_pattern(vm_name))])
         pids.update(item for item in found.split() if item.isdigit())
     except RuntimeError:
         pass  # pgrep sale con 1 cuando no hay coincidencias
     return sorted(pids)
+
+
+def _cmdline_pattern(vm_name: str) -> str:
+    # QEMU manual: "-name vm-x " / libvirt: "-name guest=vm-x,"
+    # [q] evita que pgrep encuentre al propio sudo que lo lanza
+    if not re.fullmatch(r"vm-[0-9a-f]{8}", vm_name):
+        raise NonRetryableError("VM_NAME_INVALID", vm_name)
+    return f"[q]emu-system-x86_64 -name (guest=)?{vm_name}[ ,]"
 
 
 def _alive(address: str, pid: str) -> bool:
@@ -60,6 +69,8 @@ def _wait_dead(address: str, pids: list[str], seconds: int) -> list[str]:
 
 
 def _stop_vm(address: str, vm_name: str) -> None:
+    # libvirt primero; si no aplica, se sigue con los pids
+    libvirt_vm.destroy(address, vm_name)
     pids = _qemu_pids(address, vm_name)
     if not pids:
         return
@@ -89,6 +100,7 @@ def destroy_slice_host(request: AdapterActionInput) -> dict:
         vm_id = str(vm["vm_id"])
         vm_name = "vm-" + vm_id[:8]
         _stop_vm(address, vm_name)
+        libvirt_vm.undefine(address, vm_name)
         for path in (
             _run_path(vm_name),
             str(config.STORAGE_ROOT / "overlay" / f"{vm_id}.qcow2"),

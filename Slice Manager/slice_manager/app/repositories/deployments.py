@@ -31,7 +31,7 @@ from slice_manager.app.domain.placement_simulator import (
 from slice_manager.app.planning.destroy_planner import DestroyLink, DestroyNode
 from slice_manager.app.planning.planner import CatalogFlavor, CatalogImage
 
-# Columnas de facts que el DDL actual puede persistir. El resto se reporta como warning.
+# Columnas de facts que el DDL actual puede persistir
 _SUPPORTED_ACTION_FACTS: dict[ActionOp, frozenset[str]] = {
     ActionOp.CREATE_VM: frozenset({"pid"}),
     ActionOp.ATTACH_PORT: frozenset({"mac", "ip"}),
@@ -1143,17 +1143,13 @@ class DeploymentRepository:
         )
 
     # ------------------------------------------------------------------
-    # DESTROY
+    # DESTRUIR
     # ------------------------------------------------------------------
 
     async def lock_destroy_context(
         self, connection: asyncpg.Connection, slice_id: int
     ) -> asyncpg.Record | None:
-        """Bloquea el slice y resuelve que version se esta destruyendo.
-
-        Si el slice no tiene version activa (p. ej. un Deploy que termino
-        FAILED la deja en NULL) se usa la version del ultimo deployment.
-        """
+       # Bloquea el slice
         return await connection.fetchrow(
             """
             SELECT s.id AS slice_id, s.usuario_id, s.estado AS slice_state,
@@ -1251,8 +1247,8 @@ class DeploymentRepository:
             requester_id,
             workflow_id,
         )
-        # Destruir no consume recursos: se aprueba automaticamente.
-        # start_deployment exige una fila de aprobacion APPROVED.
+        # Se aprueba automaticamente
+        # start_deployment EN una fila de aprobacion
         await connection.execute(
             """
             INSERT INTO slices.solicitud_aprobacion
@@ -1280,10 +1276,7 @@ class DeploymentRepository:
         slice_id: int,
         requester_id: int,
     ) -> None:
-        """Slice que nunca se desplego: no hay nada fisico que borrar.
-
-        Se deja una fila DESTROY COMPLETED como registro de auditoria.
-        """
+        #Slice que nunca se desplego. Se marca como ELIMiNADO
         await connection.execute(
             """
             INSERT INTO slices.deployment
@@ -1308,13 +1301,7 @@ class DeploymentRepository:
         connection: asyncpg.Connection,
         request: PlacementReleaseRequest,
     ) -> PlacementReleaseResponse:
-        """Liberacion REAL de reservas (solo con la bandera activada).
-
-        Misma logica que rollback_deployment_placement, pero por nodos del
-        plan DESTROY en vez de por createdby_deployment_id, porque las
-        reservas las creo un Deploy anterior. Cuando VM Placement termine su
-        migracion, este es el unico metodo que hay que reemplazar.
-        """
+        #Liberacion REAL de reservas + plan DESTROY  
         deployment = await connection.fetchrow(
             "SELECT tipo, plan FROM slices.deployment WHERE id = $1 FOR UPDATE",
             request.deployment_id,
@@ -1394,10 +1381,7 @@ class DeploymentRepository:
         outcome: DeploymentOutcome,
     ) -> None:
         if outcome == DeploymentOutcome.COMPLETED:
-            # Marcar DELETED/ELIMINATED basta para liberar VLAN, C-tag, CIDR,
-            # IP, MAC y display VNC: todos los indices unicos y las consultas
-            # de Network Manager y Computer Manager excluyen esas filas.
-            # Los valores se conservan como historial.
+            # Marcar ELIMINATED sirve para liberar VLAN
             await connection.execute(
                 """
                 UPDATE slices.slice_enlace_puerto AS p
@@ -1438,8 +1422,7 @@ class DeploymentRepository:
                 slice_id,
             )
         elif outcome == DeploymentOutcome.FAILED:
-            # Destruccion parcial: los nodos ya borrados quedaron DELETED via
-            # record_round_facts. El resto sigue vivo; se puede reintentar.
+            # Destruccion parcial: los nodos ya borrados quedaron DELETED 
             if version_id is not None:
                 await connection.execute(
                     """

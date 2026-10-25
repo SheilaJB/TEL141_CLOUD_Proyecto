@@ -1,19 +1,5 @@
-"""Workflow de destruccion de un slice.
+#Workflow de destruccion de un slice.
 
-Orden (importa):
-  1. start_deployment            -> deployment IN_PROGRESS
-  2. get_plan                    -> plan DESTROY congelado
-  3. destroy_slice_host x host   -> en paralelo en LINUX_QUEUE (idempotente)
-  4. record_round_facts          -> nodos destruidos quedan DELETED
-  5. release_placement           -> libera reservas (o lo SIMULA segun bandera)
-  6. finish_deployment           -> slice ELIMINATED; red y VNC quedan libres
-
-No hay compensacion: borrar no se puede deshacer. Si un host falla, el
-deployment termina FAILED, el slice queda FAILED y se puede volver a pedir
-el destroy (los pasos son idempotentes). Los recursos logicos solo se liberan
-cuando TODOS los hosts se limpiaron, para que una VLAN no se reasigne
-mientras el bridge viejo sigue vivo en algun servidor.
-"""
 
 import asyncio
 from datetime import timedelta
@@ -181,7 +167,7 @@ class DestroyWorkflow:
             action = request.action
             if isinstance(result, BaseException):
                 if not isinstance(result, Exception):
-                    raise result  # cancelacion del workflow: no se traga
+                    raise result
                 error = DeployWorkflow._error_from_exception(result)
                 failures.append(error)
                 facts.append(
@@ -204,8 +190,7 @@ class DestroyWorkflow:
                     )
                 )
 
-        # Se registran los hechos aunque haya fallos: los hosts que si se
-        # limpiaron dejan sus nodos DELETED y un reintento solo toca el resto.
+        # Limpiando dejan sus nodos deleted y un reintento solo toca el resto.
         record: RoundFactsResult = await self._execute_activity(
             ACTIVITY_RECORD_ROUND_FACTS,
             context.deployment_id,

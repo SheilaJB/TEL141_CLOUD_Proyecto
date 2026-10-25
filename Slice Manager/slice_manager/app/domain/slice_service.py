@@ -293,8 +293,8 @@ class SliceService:
                         raise ConflictError(
                             "another deployment is already active for this slice"
                         )
-                    # Peticion repetida: se reutiliza el Destroy en curso y se
-                    # vuelve a intentar arrancar su workflow (es idempotente).
+                    # Peticion repetida, ENTONCES Se reutilzia  el Destroy en curso y se
+                    # vuelve a intentar arrancar su workflow 
                     created = DeploymentCreated(
                         deployment_id=active["id"],
                         workflow_id=active["workflow_id"],
@@ -313,7 +313,6 @@ class SliceService:
                         connection
                     )
                     if context["version_id"] is None:
-                        # Nunca se desplego: no hay workflow, solo se marca.
                         if nodes:
                             raise ConflictError(
                                 "slice has live nodes but no deployed version"
@@ -537,8 +536,7 @@ class SliceService:
         self, request: PlacementReleaseRequest
     ) -> PlacementReleaseResponse:
         if not self._settings.placement_release_enabled:
-            # Bandera falsa: VM Placement se esta migrando y no se debe tocar.
-            # No se liberan reserva_nodo ni servidor.*_reserved.
+            # Bandera falsa
             logger.warning(
                 "Placement release SIMULATED (ORCHESTRATOR_PLACEMENT_RELEASE_ENABLED=false); "
                 "server reserved counters were NOT decremented",

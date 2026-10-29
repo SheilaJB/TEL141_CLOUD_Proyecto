@@ -232,6 +232,7 @@ services:
       ADAPTER_STORAGE_ROOT: /home/ubuntu/storage
       ADAPTER_RUN_ROOT: /home/ubuntu/run/vms
       ADAPTER_PUBLIC_VID: ${NETWORK_MANAGER_PUBLIC_VID:-4000}
+      ADAPTER_VM_BACKEND: ${ADAPTER_VM_BACKEND:-libvirt}
     volumes:
       - ${ADAPTER_KEYS_DIR:-./Adaptadores/keys}:/run/adapter-keys:ro
     networks: [backend, adapter]

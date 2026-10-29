@@ -111,4 +111,25 @@ Authorization: Bearer {{consumerToken}}
 POST {{baseUrl}}/slices/{{sliceId}}/versions/{{versionNumber}}/deploy
 Authorization: Bearer {{consumerToken}}
 
+### Ver estado del slice
+GET {{baseUrl}}/cruds/slices/{{sliceId}}
+Authorization: Bearer {{consumerToken}}
+
+### Ver topología (nodos y enlaces)
+GET {{baseUrl}}/cruds/slices/{{sliceId}}/topology
+Authorization: Bearer {{consumerToken}}
+
+### Destruir el slice
+# @name destroy
+POST {{baseUrl}}/slices/{{sliceId}}/destroy
+Authorization: Bearer {{consumerToken}}
+
+### Limpieza puntual: destruir los slices viejos 2 y 3 (sin VMs)
+POST {{baseUrl}}/slices/2/destroy
+Authorization: Bearer {{consumerToken}}
+
+###
+POST {{baseUrl}}/slices/3/destroy
+Authorization: Bearer {{consumerToken}}
+
 ###

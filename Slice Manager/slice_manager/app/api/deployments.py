@@ -39,6 +39,19 @@ async def request_deploy(
     return created
 
 
+@router.post(
+    "/slices/{slice_id}/destroy",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=DeploymentCreated,
+)
+async def request_destroy(
+    slice_id: int,
+    user_id: Annotated[int, Depends(get_current_user_id)],
+    service: Annotated[SliceService, Depends(get_slice_service)],
+) -> DeploymentCreated:
+    return await service.request_destroy(slice_id=slice_id, requester_id=user_id)
+
+
 @router.post("/deployments/{deployment_id}/approve")
 async def decide_deployment_approval(
     deployment_id: int,

@@ -1,4 +1,7 @@
-from contracts.placement import PlacementResult
+from contracts.placement import (
+    PlacementResult,
+
+)
 from contracts.adapter import AdapterActionInput, AdapterHost
 from contracts.servers import ServerHost
 from contracts.network import NetworkAllocation, NetworkPortAllocation
@@ -24,6 +27,7 @@ from contracts.queues import (
     ACTIVITY_GET_APPROVAL_STATE,
     ACTIVITY_GET_PLAN,
     ACTIVITY_RECORD_ROUND_FACTS,
+
     ACTIVITY_START_DEPLOYMENT,
 )
 from temporal_worker.worker.activities.slice_manager_client import SliceManagerClient
@@ -321,3 +325,8 @@ class DeploymentActivities:
             },
         )
         await self._slice_manager.finish_deployment(deployment_id, finish)
+
+    @activity.defn(name=ACTIVITY_RELEASE_PLACEMENT)
+    async def release_placement(
+        self, deployment_id: int
+    ) -> PlacementReleaseResponse:

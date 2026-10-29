@@ -17,6 +17,14 @@ from contracts.registry import (
     StartDeployment,
 )
 from contracts.servers import ServerHost
+from contracts.placement import (
+    PlacementReleaseRequest,
+    PlacementReleaseResponse,
+    PlacementReserveRequest,
+    PlacementReserveResponse,
+    PlacementRollbackRequest,
+    PlacementRollbackResponse,
+)
 from slice_manager.app.config import Settings
 from slice_manager.app.domain.capabilities import load_capabilities
 from slice_manager.app.domain.errors import (
@@ -27,7 +35,11 @@ from slice_manager.app.domain.errors import (
     WorkflowStartError,
 )
 from contracts.plan import DeploymentPlan
-from slice_manager.app.planning import InvalidSpecError, build_initial_deploy_plan
+from slice_manager.app.planning import (
+    InvalidSpecError,
+    build_destroy_plan,
+    build_initial_deploy_plan,
+)
 from slice_manager.app.planning.definition import parse_definition
 from slice_manager.app.repositories.deployments import DeploymentRepository
 
@@ -36,6 +48,8 @@ logger = logging.getLogger(__name__)
 
 class WorkflowClient(Protocol):
     async def start_deploy(self, deployment_id: int, workflow_id: str) -> None: ...
+
+    async def start_destroy(self, deployment_id: int, workflow_id: str) -> None: ...
 
     async def signal_approval(
         self,
@@ -241,6 +255,119 @@ class SliceService:
                 ) from exc
         return created
 
+    async def request_destroy(
+        self,
+        *,
+        slice_id: int,
+        requester_id: int,
+    ) -> DeploymentCreated:
+        if not self._settings.internal_service_token:
+            raise WorkflowUnavailableError(
+                "ORCHESTRATOR_INTERNAL_SERVICE_TOKEN must be configured"
+            )
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                context = await self._repository.lock_destroy_context(
+                    connection, slice_id
+                )
+                if context is None:
+                    raise ResourceNotFoundError("slice was not found")
+                if context["usuario_id"] != requester_id:
+                    raise AccessDeniedError("only the slice owner can destroy this slice")
+                if context["slice_state"] == "ELIMINATED":
+                    raise ConflictError("the slice was already destroyed")
+
+                active = await self._repository.get_active_deployment(
+                    connection, slice_id
+                )
+                if active is not None:
+                    tipo = await connection.fetchval(
+                        "SELECT tipo FROM slices.deployment WHERE id = $1",
+                        active["id"],
+                    )
+                    if tipo != "DESTROY":
+                        raise ConflictError(
+                            "another deployment is already active for this slice"
+                        )
+                    # Peticion repetida, ENTONCES Se reutilzia  el Destroy en curso y se
+                    # vuelve a intentar arrancar su workflow 
+                    created = DeploymentCreated(
+                        deployment_id=active["id"],
+                        workflow_id=active["workflow_id"],
+                        state=active["estado"],
+                        approval_status=ApprovalStatus.APPROVED,
+                    )
+                elif context["slice_state"] not in {"DRAFT", "RUNNING", "STOPPED", "FAILED"}:
+                    raise ConflictError(
+                        f"a slice in state {context['slice_state']} cannot be destroyed"
+                    )
+                else:
+                    nodes, links = await self._repository.load_destroy_inventory(
+                        connection, slice_id
+                    )
+                    deployment_id = await self._repository.reserve_deployment_id(
+                        connection
+                    )
+                    if context["version_id"] is None:
+                        if nodes:
+                            raise ConflictError(
+                                "slice has live nodes but no deployed version"
+                            )
+                        await self._repository.eliminate_undeployed_slice(
+                            connection,
+                            deployment_id=deployment_id,
+                            slice_id=slice_id,
+                            requester_id=requester_id,
+                        )
+                        logger.info(
+                            "Destroyed undeployed slice without workflow",
+                            extra={"slice_id": slice_id},
+                        )
+                        return DeploymentCreated(
+                            deployment_id=deployment_id,
+                            state="COMPLETED",
+                            approval_status=ApprovalStatus.APPROVED,
+                        )
+                    plan = build_destroy_plan(
+                        slice_id=slice_id,
+                        nodes=nodes,
+                        links=links,
+                    )
+                    workflow_id = await self._repository.create_destroy_deployment(
+                        connection,
+                        deployment_id=deployment_id,
+                        slice_id=slice_id,
+                        version_id=context["version_id"],
+                        requester_id=requester_id,
+                        plan=plan,
+                    )
+                    created = DeploymentCreated(
+                        deployment_id=deployment_id,
+                        workflow_id=workflow_id,
+                        state="PENDING",
+                        approval_status=ApprovalStatus.APPROVED,
+                    )
+
+        if created.workflow_id is not None and created.state == "PENDING":
+            logger.info(
+                "Starting destroy workflow",
+                extra={
+                    "deployment_id": created.deployment_id,
+                    "workflow_id": created.workflow_id,
+                    "idempotency_key": created.deployment_id,
+                },
+            )
+            try:
+                await self._workflow_client.start_destroy(
+                    created.deployment_id,
+                    created.workflow_id,
+                )
+            except WorkflowStartError as exc:
+                raise WorkflowUnavailableError(
+                    f"could not start Temporal workflow {created.workflow_id}"
+                ) from exc
+        return created
+
     async def approve_deployment(
         self,
         *,
@@ -294,7 +421,7 @@ class SliceService:
                 "Cannot recover pending workflows without the internal service token"
             )
             return 0
-        pending: list[tuple[int, str]] = []
+        pending: list[tuple[int, str, str]] = []
         async with self._pool.acquire() as connection:
             async with connection.transaction():
                 rows = await self._repository.list_pending_workflows(connection)
@@ -304,11 +431,14 @@ class SliceService:
                         workflow_id = await self._repository.ensure_workflow_id(
                             connection, row["id"]
                         )
-                    pending.append((row["id"], workflow_id))
+                    pending.append((row["id"], workflow_id, row["tipo"]))
         started = 0
-        for deployment_id, workflow_id in pending:
+        for deployment_id, workflow_id, tipo in pending:
             try:
-                await self._workflow_client.start_deploy(deployment_id, workflow_id)
+                if tipo == "DESTROY":
+                    await self._workflow_client.start_destroy(deployment_id, workflow_id)
+                else:
+                    await self._workflow_client.start_deploy(deployment_id, workflow_id)
                 started += 1
             except WorkflowStartError as exc:
                 logger.error(
@@ -373,6 +503,31 @@ class SliceService:
             async with connection.transaction():
                 try:
                     await self._repository.commit_inventory(connection, deployment_id)
+                except LookupError as exc:
+                    raise ResourceNotFoundError(str(exc)) from exc
+                except ValueError as exc:
+                    raise ConflictError(str(exc)) from exc
+
+    async def release_placement(
+        self, request: PlacementReleaseRequest
+    ) -> PlacementReleaseResponse:
+        if not self._settings.placement_release_enabled:
+            # Bandera falsa
+            logger.warning(
+                "Placement release SIMULATED (ORCHESTRATOR_PLACEMENT_RELEASE_ENABLED=false); "
+                "server reserved counters were NOT decremented",
+                extra={"deployment_id": request.deployment_id},
+            )
+            return PlacementReleaseResponse(
+                deployment_id=request.deployment_id,
+                simulated=True,
+            )
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                try:
+                    return await self._repository.release_destroy_placement(
+                        connection, request
+                    )
                 except LookupError as exc:
                     raise ResourceNotFoundError(str(exc)) from exc
                 except ValueError as exc:

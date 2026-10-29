@@ -30,6 +30,21 @@ class TemporalWorkflowClient:
         except (TemporalError, TimeoutError, OSError) as exc:
             raise WorkflowStartError("Temporal could not start the workflow") from exc
 
+    async def start_destroy(self, deployment_id: int, workflow_id: str) -> None:
+        client = await self._get_client()
+        try:
+            await client.start_workflow(
+                "DestroyWorkflow",
+                deployment_id,
+                id=workflow_id,
+                task_queue=self._settings.temporal_task_queue or ORCHESTRATOR_QUEUE,
+                id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
+            )
+        except WorkflowAlreadyStartedError:
+            return
+        except (TemporalError, TimeoutError, OSError) as exc:
+            raise WorkflowStartError("Temporal could not start the workflow") from exc
+
     async def signal_approval(
         self,
         workflow_id: str,

@@ -4,6 +4,7 @@ import httpx
 from temporalio.exceptions import ApplicationError
 
 from contracts.errors import ErrorCode, ErrorResponse
+
 from contracts.registry import (
     ApprovalState,
     DeploymentContext,
@@ -53,6 +54,11 @@ class SliceManagerClient:
             "GET", f"/internal/deployments/{deployment_id}/approval"
         )
         return ApprovalState.model_validate(response)
+
+    async def reserve_placement(
+        self, request: PlacementReserveRequest
+    ) -> PlacementReserveResponse:
+        XXX
 
     async def start_deployment(
         self, deployment_id: int, request: StartDeployment

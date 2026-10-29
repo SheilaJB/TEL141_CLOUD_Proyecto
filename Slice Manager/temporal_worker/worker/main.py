@@ -11,6 +11,7 @@ from temporal_worker.worker.activities.registry import DeploymentActivities
 from temporal_worker.worker.activities.slice_manager_client import SliceManagerClient
 from temporal_worker.worker.config import load_settings
 from temporal_worker.worker.workflows.deploy_workflow import DeployWorkflow
+from temporal_worker.worker.workflows.destroy_workflow import DestroyWorkflow
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ async def run_worker() -> None:
     worker = Worker(
         temporal_client,
         task_queue=settings.temporal_task_queue or ORCHESTRATOR_QUEUE,
-        workflows=[DeployWorkflow],
+        workflows=[DeployWorkflow, DestroyWorkflow],
         activities=[
             activities.get_plan,
             activities.get_approval_state,

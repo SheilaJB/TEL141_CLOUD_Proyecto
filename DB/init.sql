@@ -124,9 +124,9 @@ CREATE TABLE slices.zona_disponibilidad (
 );
 
 INSERT INTO slices.zona_disponibilidad (nombre, cluster_id, cpu_allocation_ratio_default, cpu_allocation_ratio_limit, ram_allocation_ratio_default, ram_allocation_ratio_limit, disk_allocation_ratio_default, disk_allocation_ratio_limit) VALUES
-    ('linx-1', 1, 1.0, 1.5, 1.0, 1.5, 1.0, 1.5),     -- Linux: nivel basico y avanzado, densidad alta 
-    ('linx-2', 1, 4.0, 5.5, 2.0, 2.5, 1.0, 1.5),     -- Linux: nivel avanzado, densidad baja
-    ('openst-1', 2, 6.0, 7.5, 1.0, 1.5, 1.0, 1.5);     -- OpenStack: nivel avanzado, densidad media
+    ('linx-1', 1, 4.0, 4.5, 1.0, 1.5, 1.0, 1.5),     -- Linux: nivel basico y avanzado, densidad alta 
+    ('linx-2', 1, 3.0, 3.5, 1.0, 1.5, 1.0, 1.5),     -- Linux: nivel avanzado, densidad baja
+    ('openst-1', 2, 3.0, 3.5, 1.0, 1.5, 1.0, 1.5);     -- OpenStack: nivel avanzado, densidad media
 
 CREATE TABLE auth.nivel_accede_zona (
     nivel_id INTEGER NOT NULL,
@@ -158,25 +158,28 @@ CREATE TABLE slices.servidor (
 );
 
 INSERT INTO slices.servidor (ip_serv, mac_serv, total_cpu_cores, total_ram_mb, total_disk_mb, zona_id) VALUES
-    ('10.0.10.1', 'fa:16:3e:b5:67:64', 6, 5430, 16200, 1),
-    ('10.0.10.2', 'fa:16:3e:7e:ec:a4', 6, 5430, 16600, 1),
-    ('10.0.10.3', 'fa:16:3e:05:b2:5d', 6, 5430, 15800, 1);
-    -- ('192.168.1.14', '00:11:22:33:44:59', 16, 16384, 102400, 3),
-    -- ('192.168.1.15', '00:11:22:33:44:60', 8, 16384, 102400, 3);
+    ('192.168.201.1', 'fa:16:3e:6d:2a:ec', 4, 3490, 7000, 1),       -- server 1
+    ('192.168.201.2', 'fa:16:3e:0c:21:0d', 4, 3490, 7300, 2),       -- server 2
+    ('192.168.201.3', 'fa:16:3e:05:b2:5d', 4, 3490, 7100, 2),       -- server 3
+    ('192.168.201.4', 'fa:16:3e:05:b2:5d', 4, 3490, 7100, 2);       -- server 4
+    -- ('192.168.202.2', 'fa:16:3e:ee:0c:46', 4, 3100X, 6400X, 3),    -- worker 1
+    -- ('192.168.202.3', 'fa:16:3e:24:7d:00', 4, 3100X, 6400X, 3),     -- worker 2
+    -- ('192.168.202.3', 'fa:16:3e:d3:f3:4d', 4, 3100X, 6400X, 3);     -- worker 3
 
 CREATE TABLE slices.image (
     id                      SERIAL PRIMARY KEY,
     nombre                  TEXT NOT NULL,
     cluster_compatible      INTEGER REFERENCES slices.cluster(id),  -- puede ser NULL, cluster donde se puede desplegar la imagen
     ruta_referencia         TEXT NOT NULL,   -- ubicación/id real de la imagen
+    diskmb_size           INTEGER NOT NULL,  -- verificar con flavor
     contador_refs           INTEGER NOT NULL DEFAULT 0,
     estado                  TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (estado IN ('ACTIVE', 'DEPRECATED', 'DELETED'))
 );
 
 INSERT INTO slices.image (nombre, cluster_compatible, ruta_referencia) VALUES
-    ('Cirros', 1, 'cirros-0.6.2-x86_64-disk.img'),
+    ('Cirros', 1, 'cirros-0.6.2-x86_64-disk.img', 150),
     -- ('Linux Alpine', 1, '/images/alpine.qcow2'),
-    ('Ubuntu', 1, 'focal-server-cloudimg-amd64.img');
+    ('Ubuntu', 1, 'focal-server-cloudimg-amd64.img', 2350);
 
 CREATE TABLE slices.flavor (
     id                  SERIAL PRIMARY KEY,
@@ -189,8 +192,8 @@ CREATE TABLE slices.flavor (
 );
 
 INSERT INTO slices.flavor (name, descripcion, vcpu, vram_mb, vdisk_mb) VALUES
-    ('verde-ex1', 'Verde: ex1', 1, 500, 2800),
-    ('rojo-ex1', 'Rojo: ex1', 1, 500, 1500),
+    ('verde-ex2', 'Verde: ex1', 1, 500, 2800),
+    ('rojo-ex2', 'Rojo: ex1', 1, 500, 2800),
     ('micro-v1', 'Micro: 1 vCPU, 256 MB RAM, 1 GB disco', 1, 256, 1000),
     ('small-v1', 'Pequeño: 1 vCPU, 512 MB RAM, 1 GB disco', 1, 512, 1000),
     ('medium-v1', 'Mediano: 2 vCPU, 512 MB RAM, 600 MB disco', 1, 512, 2500),

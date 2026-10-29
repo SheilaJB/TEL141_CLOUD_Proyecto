@@ -46,10 +46,9 @@ async def run_worker() -> None:
             activities.start_deployment,
             activities.record_round_facts,
             activities.finish_deployment,
-            activities.reserve,
-            activities.rollback_reservation,
             activities.build_adapter_actions,
             activities.create_inventory,
+            activities.commit_inventory,
             activities.get_server_directory,
         ],
     )

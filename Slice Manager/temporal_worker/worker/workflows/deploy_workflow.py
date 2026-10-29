@@ -21,6 +21,8 @@ from contracts.queues import (
     ACTIVITY_NETWORK_ROLLBACK,
     ACTIVITY_BUILD_ADAPTER_ACTIONS,
     ACTIVITY_CREATE_INVENTORY,
+    ACTIVITY_COMMIT_INVENTORY,
+    ACTIVITY_FINALIZE_PLACEMENT,
     ACTIVITY_GET_SERVER_DIRECTORY,
     ACTIVITY_COMPUTE_ALLOCATE,
     ACTIVITY_ROLLBACK_COMPUTE,
@@ -28,6 +30,7 @@ from contracts.queues import (
     LINUX_QUEUE,
     NETWORK_QUEUE,
     ORCHESTRATOR_QUEUE,
+    PLACEMENT_QUEUE,
 )
 from contracts.servers import ServerHost
 from contracts.registry import (
@@ -148,6 +151,7 @@ class DeployWorkflow:
         prepared_actions: dict[str, AdapterActionInput] = {}
         compute_attempted = False
         reversibility_reached = False
+        inventory_committed = False
 
         try:
             approval = await self._get_approval_state(deployment_id)
@@ -210,13 +214,13 @@ class DeployWorkflow:
                 retry_policy=REGISTRY_RETRY_POLICY,
             )
             reserve_task = None
-            if context.plan.reservation.allocate:
+            if context.plan.reservation.allocate or context.plan.reservation.resize:
                 reservation_attempted = True
                 reserve_task = self._execute_activity(
                     ACTIVITY_RESERVE_PLACEMENT,
                     deployment_id,
                     result_type=PlacementReserveResponse,
-                    task_queue=ORCHESTRATOR_QUEUE,
+                    task_queue=PLACEMENT_QUEUE,
                     start_to_close_timeout=PLACEMENT_ACTIVITY_TIMEOUT,
                     retry_policy=PLACEMENT_RETRY_POLICY,
                 )
@@ -337,6 +341,25 @@ class DeployWorkflow:
                 ):
                     reversibility_reached = True
 
+            await self._execute_activity(
+                ACTIVITY_COMMIT_INVENTORY,
+                deployment_id,
+                task_queue=ORCHESTRATOR_QUEUE,
+                retry_policy=REGISTRY_RETRY_POLICY,
+            )
+            inventory_committed = True
+            if (
+                context.plan.reservation.allocate
+                or context.plan.reservation.resize
+                or context.plan.reservation.release
+            ):
+                await self._execute_activity(
+                    ACTIVITY_FINALIZE_PLACEMENT,
+                    deployment_id,
+                    task_queue=PLACEMENT_QUEUE,
+                    start_to_close_timeout=PLACEMENT_ACTIVITY_TIMEOUT,
+                    retry_policy=PLACEMENT_RETRY_POLICY,
+                )
             await self._finish(deployment_id, DeploymentOutcome.COMPLETED)
             return DeploymentOutcome.COMPLETED.value
         except (ActivityError, ApplicationError, DeploymentStepFailed) as exc:
@@ -345,7 +368,7 @@ class DeployWorkflow:
                 if isinstance(exc, DeploymentStepFailed)
                 else self._error_from_exception(exc)
             )
-            if reversibility_reached:
+            if inventory_committed or reversibility_reached:
                 await self._finish(
                     deployment_id,
                     DeploymentOutcome.FAILED,
@@ -576,7 +599,7 @@ class DeployWorkflow:
                 await self._execute_activity(
                     ACTIVITY_ROLLBACK_PLACEMENT,
                     deployment_id,
-                    task_queue=ORCHESTRATOR_QUEUE,
+                    task_queue=PLACEMENT_QUEUE,
                     retry_policy=COMPENSATION_RETRY_POLICY,
                 )
             except (ActivityError, ApplicationError) as exc:

@@ -1,16 +1,11 @@
-from contracts.placement import (
-    PlacementReserveRequest,
-    PlacementResult,
-    PlacementRollbackRequest,
-    PlacementReserveResponse,
-    PlacementRollbackResponse,
-)
+from contracts.placement import PlacementResult
 from contracts.adapter import AdapterActionInput, AdapterHost
 from contracts.servers import ServerHost
 from contracts.network import NetworkAllocation, NetworkPortAllocation
 from contracts.plan import ActionOp, DeploymentPlan
 from contracts.queues import (
     ACTIVITY_BUILD_ADAPTER_ACTIONS,
+    ACTIVITY_COMMIT_INVENTORY,
     ACTIVITY_CREATE_INVENTORY,
     ACTIVITY_GET_SERVER_DIRECTORY,
 )
@@ -29,8 +24,6 @@ from contracts.queues import (
     ACTIVITY_GET_APPROVAL_STATE,
     ACTIVITY_GET_PLAN,
     ACTIVITY_RECORD_ROUND_FACTS,
-    ACTIVITY_RESERVE_PLACEMENT,
-    ACTIVITY_ROLLBACK_PLACEMENT,
     ACTIVITY_START_DEPLOYMENT,
 )
 from temporal_worker.worker.activities.slice_manager_client import SliceManagerClient
@@ -256,6 +249,10 @@ class DeploymentActivities:
     async def create_inventory(self, deployment_id: int) -> None:
         await self._slice_manager.create_inventory(deployment_id)
 
+    @activity.defn(name=ACTIVITY_COMMIT_INVENTORY)
+    async def commit_inventory(self, deployment_id: int) -> None:
+        await self._slice_manager.commit_inventory(deployment_id)
+
     @activity.defn(name=ACTIVITY_GET_SERVER_DIRECTORY)
     async def get_server_directory(self, slice_id: int) -> list[ServerHost]:
         return await self._slice_manager.get_server_directory(slice_id)
@@ -324,33 +321,3 @@ class DeploymentActivities:
             },
         )
         await self._slice_manager.finish_deployment(deployment_id, finish)
-
-    @activity.defn(name=ACTIVITY_RESERVE_PLACEMENT)
-    async def reserve(self, deployment_id: int) -> PlacementReserveResponse:
-        activity.logger.info(
-            "Requesting local Placement reservation",
-            extra={
-                "deployment_id": deployment_id,
-                "workflow_id": activity.info().workflow_id,
-                "idempotency_key": deployment_id,
-            },
-        )
-        return await self._slice_manager.reserve_placement(
-            PlacementReserveRequest(deployment_id=deployment_id)
-        )
-
-    @activity.defn(name=ACTIVITY_ROLLBACK_PLACEMENT)
-    async def rollback_reservation(
-        self, deployment_id: int
-    ) -> PlacementRollbackResponse:
-        activity.logger.info(
-            "Requesting local Placement rollback",
-            extra={
-                "deployment_id": deployment_id,
-                "workflow_id": activity.info().workflow_id,
-                "idempotency_key": deployment_id,
-            },
-        )
-        return await self._slice_manager.rollback_placement(
-            PlacementRollbackRequest(deployment_id=deployment_id)
-        )

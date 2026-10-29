@@ -11,10 +11,6 @@ class PlacementStatus(StrEnum):
     RELEASED = "RELEASED"
 
 
-class PlacementReserveRequest(ContractModel):
-    deployment_id: int = Field(gt=0)
-
-
 class PlacementAllocation(ContractModel):
     node_id: UUID
     server_id: int = Field(gt=0)
@@ -50,12 +46,3 @@ class PlacementResult(ContractModel):
                 for allocation in response.allocations
             },
         )
-
-
-class PlacementRollbackRequest(ContractModel):
-    deployment_id: int = Field(gt=0)
-
-
-class PlacementRollbackResponse(ContractModel):
-    deployment_id: int = Field(gt=0)
-    status: PlacementStatus = PlacementStatus.RELEASED

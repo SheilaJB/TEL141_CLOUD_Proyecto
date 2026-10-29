@@ -1,5 +1,4 @@
 import json
-from collections import Counter
 from collections.abc import Mapping
 from decimal import Decimal
 from uuid import UUID
@@ -7,24 +6,12 @@ from uuid import UUID
 import asyncpg
 
 from contracts.plan import ActionOp, DeploymentPlan
-from contracts.placement import (
-    PlacementAllocation,
-    PlacementReserveRequest,
-    PlacementReserveResponse,
-    PlacementRollbackRequest,
-    PlacementRollbackResponse,
-)
 from contracts.registry import (
     ActionFact,
     DeploymentOutcome,
     FinishDeployment,
     RoundFacts,
     RoundFactsResult,
-)
-from slice_manager.app.domain.placement_simulator import (
-    NodeDemand,
-    ServerCapacity,
-    simulate_deploy_placement,
 )
 from slice_manager.app.planning.planner import CatalogFlavor, CatalogImage
 
@@ -516,6 +503,85 @@ class DeploymentRepository:
             images=images,
         )
 
+    async def commit_inventory(
+        self, connection: asyncpg.Connection, deployment_id: int
+    ) -> None:
+        row = await connection.fetchrow(
+            """
+            SELECT d.estado, d.plan, d.slice_id
+            FROM slices.deployment d
+            JOIN slices.slice s ON s.id = d.slice_id
+            WHERE d.id = $1
+            FOR UPDATE OF d, s
+            """,
+            deployment_id,
+        )
+        if row is None:
+            raise LookupError(f"deployment {deployment_id} was not found")
+        if row["estado"] not in {"IN_PROGRESS", "COMPLETED"}:
+            raise ValueError("inventory commit requires an in-progress deployment")
+        plan = DeploymentPlan.model_validate_json(row["plan"])
+        flavor_updates: dict[UUID, str] = {}
+        for intent in plan.intents:
+            if intent.target.table != "vms":
+                continue
+            for change in intent.changes:
+                if change.field == "flavor_ref" and isinstance(change.after, str):
+                    flavor_updates[intent.target.id] = change.after
+
+        flavor_names = set(flavor_updates.values())
+        flavor_rows = await connection.fetch(
+            """
+            SELECT id, name
+            FROM slices.flavor
+            WHERE name = ANY($1::text[]) AND activo
+            """,
+            list(flavor_names),
+        )
+        flavor_id_by_name = {item["name"]: item["id"] for item in flavor_rows}
+        if set(flavor_id_by_name) != flavor_names:
+            raise ValueError("inventory commit references a missing or inactive flavor")
+        for node_id, flavor_name in flavor_updates.items():
+            status = await connection.execute(
+                """
+                UPDATE slices.slice_nodo
+                SET flavor_id = $3
+                WHERE id = $1 AND slice_id = $2
+                """,
+                node_id,
+                row["slice_id"],
+                flavor_id_by_name[flavor_name],
+            )
+            if not status.endswith(" 1"):
+                raise ValueError(f"inventory node {node_id} was not found in the deployment slice")
+
+        released_node_ids = [item.node_id for item in plan.reservation.release]
+        if released_node_ids:
+            updated_nodes = await connection.fetch(
+                """
+                UPDATE slices.slice_nodo
+                SET estado_nodo = 'DELETED'
+                WHERE slice_id = $1 AND id = ANY($2::uuid[])
+                  AND estado_nodo <> 'DELETED'
+                RETURNING id
+                """,
+                row["slice_id"],
+                released_node_ids,
+            )
+            updated_ids = {item["id"] for item in updated_nodes}
+            already_deleted = await connection.fetch(
+                """
+                SELECT id
+                FROM slices.slice_nodo
+                WHERE slice_id = $1 AND id = ANY($2::uuid[])
+                  AND estado_nodo = 'DELETED'
+                """,
+                row["slice_id"],
+                released_node_ids,
+            )
+            if updated_ids | {item["id"] for item in already_deleted} != set(released_node_ids):
+                raise ValueError("inventory release nodes do not match deployment slice")
+
     async def get_approval_state(
         self, connection: asyncpg.Connection, deployment_id: int
     ) -> asyncpg.Record | None:
@@ -565,254 +631,6 @@ class DeploymentRepository:
             """,
             row["target_version_id"],
         )
-
-    async def reserve_deployment_placement(
-        self,
-        connection: asyncpg.Connection,
-        request: PlacementReserveRequest,
-    ) -> PlacementReserveResponse:
-        row = await connection.fetchrow(
-            """
-            SELECT d.tipo, d.estado, d.plan, s.id AS slice_id, s.zona_id
-            FROM slices.deployment AS d
-            JOIN slices.slice AS s ON s.id = d.slice_id
-            WHERE d.id = $1
-            FOR UPDATE OF d, s
-            """,
-            request.deployment_id,
-        )
-        if row is None:
-            raise LookupError(f"deployment {request.deployment_id} was not found")
-        if row["tipo"] != "DEPLOY" or row["estado"] != "IN_PROGRESS":
-            raise ValueError("Placement reservation requires an in-progress DEPLOY")
-
-        plan_value = row["plan"]
-        plan = (
-            DeploymentPlan.model_validate(plan_value)
-            if isinstance(plan_value, Mapping)
-            else DeploymentPlan.model_validate_json(str(plan_value))
-        )
-        if plan.reservation.resize or plan.reservation.release:
-            raise ValueError("local Placement simulation supports initial DEPLOY only")
-        demands = [
-            NodeDemand(
-                node_id=allocation.node_id,
-                vcpu=allocation.resources.vcpu,
-                ram_mb=allocation.resources.ram_mb,
-                disk_mb=allocation.resources.disk_mb,
-            )
-            for allocation in plan.reservation.allocate
-        ]
-        node_ids = [demand.node_id for demand in demands]
-        if len(node_ids) != len(set(node_ids)):
-            raise ValueError("deployment plan contains duplicate node allocations")
-        if not demands:
-            return PlacementReserveResponse(deployment_id=request.deployment_id)
-
-        inventory_rows = await connection.fetch(
-            """
-            SELECT id
-            FROM slices.slice_nodo
-            WHERE slice_id = $1 AND id = ANY($2::uuid[])
-            """,
-            row["slice_id"],
-            node_ids,
-        )
-        if {item["id"] for item in inventory_rows} != set(node_ids):
-            raise ValueError("deployment plan nodes do not match the slice inventory")
-
-        existing_rows = await connection.fetch(
-            """
-            SELECT servidor_id, nodo_id, recurso, cantidad_reservada, estado
-            FROM slices.reserva_nodo
-            WHERE createdby_deployment_id = $1
-            ORDER BY nodo_id, recurso, id
-            """,
-            request.deployment_id,
-        )
-        expected = Counter(
-            (str(demand.node_id), resource, amount)
-            for demand in demands
-            for resource, amount in (
-                ("vcpu", demand.vcpu),
-                ("vram_mb", demand.ram_mb),
-                ("vdisk_mb", demand.disk_mb),
-            )
-            if amount > 0
-        )
-        if existing_rows:
-            if any(item["estado"] != "RESERVED" for item in existing_rows):
-                raise ValueError("deployment placement was already rolled back")
-            actual = Counter(
-                (str(item["nodo_id"]), item["recurso"], item["cantidad_reservada"])
-                for item in existing_rows
-            )
-            if actual != expected:
-                raise ValueError("existing Placement reservations do not match the plan")
-            node_servers: dict[UUID, set[int]] = {}
-            for item in existing_rows:
-                node_servers.setdefault(item["nodo_id"], set()).add(item["servidor_id"])
-            if any(len(server_ids) != 1 for server_ids in node_servers.values()):
-                raise ValueError("a node's Placement resources span multiple servers")
-            allocation_by_node = {
-                node_id: next(iter(server_ids))
-                for node_id, server_ids in node_servers.items()
-            }
-            if set(allocation_by_node) != set(node_ids):
-                raise ValueError("existing Placement reservations are incomplete")
-            return PlacementReserveResponse(
-                deployment_id=request.deployment_id,
-                allocations=[
-                    PlacementAllocation(
-                        node_id=demand.node_id,
-                        server_id=allocation_by_node[demand.node_id],
-                    )
-                    for demand in demands
-                ],
-            )
-
-        server_rows = await connection.fetch(
-            """
-            SELECT id, total_cpu_cores, total_ram_mb, total_disk_mb,
-                   vcpu_reserved, vram_mb_reserved, vdisk_mb_reserved
-            FROM slices.servidor
-            WHERE zona_id = $1 AND estado = 'ACTIVE'
-            ORDER BY id
-            FOR UPDATE
-            """,
-            row["zona_id"],
-        )
-        servers = [
-            ServerCapacity(
-                server_id=server["id"],
-                vcpu_available=server["total_cpu_cores"] - server["vcpu_reserved"],
-                ram_mb_available=server["total_ram_mb"] - server["vram_mb_reserved"],
-                disk_mb_available=server["total_disk_mb"] - server["vdisk_mb_reserved"],
-            )
-            for server in server_rows
-        ]
-        result = simulate_deploy_placement(request, demands, servers)
-
-        server_by_node = {
-            allocation.node_id: allocation.server_id
-            for allocation in result.allocations
-        }
-        demands_by_server: dict[int, list[int]] = {}
-        for demand in demands:
-            server_id = server_by_node[demand.node_id]
-            amounts = demands_by_server.setdefault(server_id, [0, 0, 0])
-            amounts[0] += demand.vcpu
-            amounts[1] += demand.ram_mb
-            amounts[2] += demand.disk_mb
-            for resource_name, amount in (
-                ("vcpu", demand.vcpu),
-                ("vram_mb", demand.ram_mb),
-                ("vdisk_mb", demand.disk_mb),
-            ):
-                if amount > 0:
-                    await connection.execute(
-                        """
-                        INSERT INTO slices.reserva_nodo
-                            (servidor_id, nodo_id, createdby_deployment_id,
-                             recurso, cantidad_reservada, estado)
-                        VALUES ($1, $2, $3, $4, $5, 'RESERVED')
-                        """,
-                        server_id,
-                        demand.node_id,
-                        request.deployment_id,
-                        resource_name,
-                        amount,
-                    )
-        for server_id, amounts in demands_by_server.items():
-            await connection.execute(
-                """
-                UPDATE slices.servidor
-                SET vcpu_reserved = vcpu_reserved + $2,
-                    vram_mb_reserved = vram_mb_reserved + $3,
-                    vdisk_mb_reserved = vdisk_mb_reserved + $4
-                WHERE id = $1
-                """,
-                server_id,
-                *amounts,
-            )
-        return result
-
-    async def rollback_deployment_placement(
-        self,
-        connection: asyncpg.Connection,
-        request: PlacementRollbackRequest,
-    ) -> PlacementRollbackResponse:
-        deployment = await connection.fetchrow(
-            """
-            SELECT tipo
-            FROM slices.deployment
-            WHERE id = $1
-            FOR UPDATE
-            """,
-            request.deployment_id,
-        )
-        if deployment is None:
-            raise LookupError(f"deployment {request.deployment_id} was not found")
-        if deployment["tipo"] != "DEPLOY":
-            raise ValueError("local Placement rollback supports initial DEPLOY only")
-
-        server_ids = await connection.fetch(
-            """
-            SELECT DISTINCT servidor_id
-            FROM slices.reserva_nodo
-            WHERE createdby_deployment_id = $1 AND estado = 'RESERVED'
-            ORDER BY servidor_id
-            """,
-            request.deployment_id,
-        )
-        locked_servers = await connection.fetch(
-            """
-            SELECT id
-            FROM slices.servidor
-            WHERE id = ANY($1::integer[])
-            ORDER BY id
-            FOR UPDATE
-            """,
-            [item["servidor_id"] for item in server_ids],
-        )
-        if len(locked_servers) != len(server_ids):
-            raise ValueError("a reserved Placement server no longer exists")
-
-        released_rows = await connection.fetch(
-            """
-            UPDATE slices.reserva_nodo
-            SET estado = 'RELEASED', fecha_liberacion = now()
-            WHERE createdby_deployment_id = $1 AND estado = 'RESERVED'
-            RETURNING servidor_id, recurso, cantidad_reservada
-            """,
-            request.deployment_id,
-        )
-        released_by_server: dict[int, list[int]] = {}
-        resource_indexes = {"vcpu": 0, "vram_mb": 1, "vdisk_mb": 2}
-        for item in released_rows:
-            index = resource_indexes.get(item["recurso"])
-            if index is None:
-                raise ValueError(f"unsupported reserved resource {item['recurso']!r}")
-            amounts = released_by_server.setdefault(item["servidor_id"], [0, 0, 0])
-            amounts[index] += item["cantidad_reservada"]
-        for server_id, amounts in released_by_server.items():
-            result = await connection.execute(
-                """
-                UPDATE slices.servidor
-                SET vcpu_reserved = vcpu_reserved - $2,
-                    vram_mb_reserved = vram_mb_reserved - $3,
-                    vdisk_mb_reserved = vdisk_mb_reserved - $4
-                WHERE id = $1
-                  AND vcpu_reserved >= $2
-                  AND vram_mb_reserved >= $3
-                  AND vdisk_mb_reserved >= $4
-                """,
-                server_id,
-                *amounts,
-            )
-            if not result.endswith(" 1"):
-                raise ValueError("server reserved counters are inconsistent with Placement rows")
-        return PlacementRollbackResponse(deployment_id=request.deployment_id)
 
     async def record_round_facts(
         self, connection: asyncpg.Connection, deployment_id: int, facts: RoundFacts

@@ -17,18 +17,11 @@ from contracts.registry import (
     StartDeployment,
 )
 from contracts.servers import ServerHost
-from contracts.placement import (
-    PlacementReserveRequest,
-    PlacementReserveResponse,
-    PlacementRollbackRequest,
-    PlacementRollbackResponse,
-)
 from slice_manager.app.config import Settings
 from slice_manager.app.domain.capabilities import load_capabilities
 from slice_manager.app.domain.errors import (
     AccessDeniedError,
     ConflictError,
-    InsufficientCapacityError,
     ResourceNotFoundError,
     WorkflowUnavailableError,
     WorkflowStartError,
@@ -36,9 +29,6 @@ from slice_manager.app.domain.errors import (
 from contracts.plan import DeploymentPlan
 from slice_manager.app.planning import InvalidSpecError, build_initial_deploy_plan
 from slice_manager.app.planning.definition import parse_definition
-from slice_manager.app.domain.placement_simulator import (
-    InsufficientPlacementCapacity,
-)
 from slice_manager.app.repositories.deployments import DeploymentRepository
 
 logger = logging.getLogger(__name__)
@@ -378,31 +368,11 @@ class SliceService:
                 except ValueError as exc:
                     raise ConflictError(str(exc)) from exc
 
-    async def reserve_placement(
-        self, request: PlacementReserveRequest
-    ) -> PlacementReserveResponse:
+    async def commit_inventory(self, deployment_id: int) -> None:
         async with self._pool.acquire() as connection:
             async with connection.transaction():
                 try:
-                    return await self._repository.reserve_deployment_placement(
-                        connection, request
-                    )
-                except LookupError as exc:
-                    raise ResourceNotFoundError(str(exc)) from exc
-                except InsufficientPlacementCapacity as exc:
-                    raise InsufficientCapacityError(str(exc)) from exc
-                except ValueError as exc:
-                    raise ConflictError(str(exc)) from exc
-
-    async def rollback_placement(
-        self, request: PlacementRollbackRequest
-    ) -> PlacementRollbackResponse:
-        async with self._pool.acquire() as connection:
-            async with connection.transaction():
-                try:
-                    return await self._repository.rollback_deployment_placement(
-                        connection, request
-                    )
+                    await self._repository.commit_inventory(connection, deployment_id)
                 except LookupError as exc:
                     raise ResourceNotFoundError(str(exc)) from exc
                 except ValueError as exc:

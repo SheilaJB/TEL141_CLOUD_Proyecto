@@ -141,8 +141,29 @@ services:
       ORCHESTRATOR_TEMPORAL_TASK_QUEUE: ${ORCHESTRATOR_TEMPORAL_TASK_QUEUE:-orchestrator-queue}
       ORCHESTRATOR_SLICE_MANAGER_URL: http://slice-manager:8000
       ORCHESTRATOR_INTERNAL_SERVICE_TOKEN: ${ORCHESTRATOR_INTERNAL_SERVICE_TOKEN}
-      ORCHESTRATOR_SIMULATED_PLACEMENT_SERVER_ID: ${ORCHESTRATOR_SIMULATED_PLACEMENT_SERVER_ID:-1}
       APPROVAL_TIMEOUT_SECONDS: ${APPROVAL_TIMEOUT_SECONDS:-86400}
+    networks: [backend]
+
+  # Worker Temporal de VM Placement
+  placement-service:
+    build:
+      context: ./VM Placement/placement-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      temporal-create-namespace:
+        condition: service_completed_successfully
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-cloud_g3}
+      SPRING_DATASOURCE_USERNAME: ${APP_DB_USER:-cloud_admin}
+      SPRING_DATASOURCE_PASSWORD: ${APP_DB_PASSWORD}
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${ORCHESTRATOR_TEMPORAL_NAMESPACE:-default}
+      PLACEMENT_FLAVOR_REFERENCIA: ${PLACEMENT_FLAVOR_REFERENCIA:-small-v1}
     networks: [backend]
 
   # Worker Temporal del Network Manager

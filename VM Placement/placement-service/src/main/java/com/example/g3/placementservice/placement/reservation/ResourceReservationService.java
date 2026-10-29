@@ -1,8 +1,11 @@
 package com.example.g3.placementservice.placement.reservation;
 
-import com.example.g3.placementservice.placement.domain.PlacementPlan;
-import com.example.g3.placementservice.placement.domain.PlacementResult;
+import com.example.g3.placementservice.placement.domain.PlacementSolution;
 
 public interface ResourceReservationService {
-    PlacementResult reserve(Integer sliceVersionId, PlacementPlan plan);
+    PlacementSolution reserve(long deploymentId);
+
+    void rollbackReservation(long deploymentId);
+
+    void finalizeReservation(long deploymentId);
 }

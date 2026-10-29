@@ -5,7 +5,7 @@ import ai.timefold.solver.core.api.domain.solution.PlanningScore;
 import ai.timefold.solver.core.api.domain.solution.PlanningSolution;
 import ai.timefold.solver.core.api.domain.solution.ProblemFactCollectionProperty;
 import ai.timefold.solver.core.api.domain.valuerange.ValueRangeProvider;
-import ai.timefold.solver.core.api.score.HardSoftScore;
+import ai.timefold.solver.core.api.score.HardSoftBigDecimalScore;
 import java.util.List;
 
 @PlanningSolution
@@ -15,17 +15,24 @@ public class TimefoldSolution {
     @ProblemFactCollectionProperty
     private List<TimefoldWorker> workers;
 
+    @ProblemFactCollectionProperty
+    private List<TimefoldSliceMember> sliceMembers;
+
     @PlanningEntityCollectionProperty
     private List<TimefoldVm> vms;
 
     @PlanningScore
-    private HardSoftScore score;
+    private HardSoftBigDecimalScore score;
 
     public TimefoldSolution() {
     }
 
-    public TimefoldSolution(List<TimefoldWorker> workers, List<TimefoldVm> vms) {
+    public TimefoldSolution(
+            List<TimefoldWorker> workers,
+            List<TimefoldSliceMember> sliceMembers,
+            List<TimefoldVm> vms) {
         this.workers = workers;
+        this.sliceMembers = sliceMembers;
         this.vms = vms;
     }
 
@@ -37,6 +44,14 @@ public class TimefoldSolution {
         this.workers = workers;
     }
 
+    public List<TimefoldSliceMember> getSliceMembers() {
+        return sliceMembers;
+    }
+
+    public void setSliceMembers(List<TimefoldSliceMember> sliceMembers) {
+        this.sliceMembers = sliceMembers;
+    }
+
     public List<TimefoldVm> getVms() {
         return vms;
     }
@@ -45,11 +60,11 @@ public class TimefoldSolution {
         this.vms = vms;
     }
 
-    public HardSoftScore getScore() {
+    public HardSoftBigDecimalScore getScore() {
         return score;
     }
 
-    public void setScore(HardSoftScore score) {
+    public void setScore(HardSoftBigDecimalScore score) {
         this.score = score;
     }
 }

@@ -1,8 +1,8 @@
 package com.example.g3.placementservice.placement.engine;
 
-import com.example.g3.placementservice.placement.domain.PlacementPlan;
 import com.example.g3.placementservice.placement.domain.PlacementProblem;
+import com.example.g3.placementservice.placement.domain.PlacementSolution;
 
 public interface PlacementEngine {
-    PlacementPlan solve(PlacementProblem problem);
+    PlacementSolution solve(PlacementProblem problem);
 }

@@ -5,10 +5,7 @@ from contracts.plan import Action, ActionOp, DeploymentPlan, Intent, PlanType
 from contracts.placement import (
     PlacementAllocation,
     PlacementResult,
-    PlacementReserveRequest,
     PlacementReserveResponse,
-    PlacementRollbackRequest,
-    PlacementRollbackResponse,
 )
 from contracts.network import (
     NetworkAllocation,
@@ -40,10 +37,7 @@ __all__ = [
     "Intent",
     "PlacementAllocation",
     "PlacementResult",
-    "PlacementReserveRequest",
     "PlacementReserveResponse",
-    "PlacementRollbackRequest",
-    "PlacementRollbackResponse",
     "NetworkAllocation",
     "NetworkLinkAllocation",
     "NetworkPortAllocation",

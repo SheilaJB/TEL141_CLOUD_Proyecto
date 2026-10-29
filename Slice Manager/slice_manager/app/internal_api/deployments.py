@@ -2,12 +2,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from contracts.placement import (
-    PlacementReserveRequest,
-    PlacementReserveResponse,
-    PlacementRollbackRequest,
-    PlacementRollbackResponse,
-)
 from contracts.registry import (
     ApprovalState,
     DeploymentContext,
@@ -21,28 +15,6 @@ from slice_manager.app.api.dependencies import get_slice_service, require_intern
 from slice_manager.app.domain.slice_service import SliceService
 
 router = APIRouter(dependencies=[Depends(require_internal_service)])
-
-
-@router.post(
-    "/placements/reserve",
-    response_model=PlacementReserveResponse,
-)
-async def reserve_placement(
-    body: PlacementReserveRequest,
-    service: Annotated[SliceService, Depends(get_slice_service)],
-) -> PlacementReserveResponse:
-    return await service.reserve_placement(body)
-
-
-@router.post(
-    "/placements/rollback",
-    response_model=PlacementRollbackResponse,
-)
-async def rollback_placement(
-    body: PlacementRollbackRequest,
-    service: Annotated[SliceService, Depends(get_slice_service)],
-) -> PlacementRollbackResponse:
-    return await service.rollback_placement(body)
 
 
 @router.get("/deployments/{deployment_id}/plan", response_model=DeploymentContext)
@@ -67,6 +39,14 @@ async def create_inventory(
     service: Annotated[SliceService, Depends(get_slice_service)],
 ) -> None:
     await service.create_inventory(deployment_id)
+
+
+@router.post("/deployments/{deployment_id}/inventory/commit", status_code=204)
+async def commit_inventory(
+    deployment_id: int,
+    service: Annotated[SliceService, Depends(get_slice_service)],
+) -> None:
+    await service.commit_inventory(deployment_id)
 
 
 @router.get(

@@ -4,12 +4,6 @@ import httpx
 from temporalio.exceptions import ApplicationError
 
 from contracts.errors import ErrorCode, ErrorResponse
-from contracts.placement import (
-    PlacementReserveRequest,
-    PlacementReserveResponse,
-    PlacementRollbackRequest,
-    PlacementRollbackResponse,
-)
 from contracts.registry import (
     ApprovalState,
     DeploymentContext,
@@ -42,6 +36,12 @@ class SliceManagerClient:
     async def create_inventory(self, deployment_id: int) -> None:
         await self._request("POST", f"/internal/deployments/{deployment_id}/inventory")
 
+    async def commit_inventory(self, deployment_id: int) -> None:
+        await self._request(
+            "POST",
+            f"/internal/deployments/{deployment_id}/inventory/commit",
+        )
+
     async def get_server_directory(self, slice_id: int) -> list[ServerHost]:
         response = await self._request(
             "GET", f"/internal/slices/{slice_id}/server-directory"
@@ -53,26 +53,6 @@ class SliceManagerClient:
             "GET", f"/internal/deployments/{deployment_id}/approval"
         )
         return ApprovalState.model_validate(response)
-
-    async def reserve_placement(
-        self, request: PlacementReserveRequest
-    ) -> PlacementReserveResponse:
-        response = await self._request(
-            "POST",
-            "/internal/placements/reserve",
-            json=request.model_dump(mode="json"),
-        )
-        return PlacementReserveResponse.model_validate(response)
-
-    async def rollback_placement(
-        self, request: PlacementRollbackRequest
-    ) -> PlacementRollbackResponse:
-        response = await self._request(
-            "POST",
-            "/internal/placements/rollback",
-            json=request.model_dump(mode="json"),
-        )
-        return PlacementRollbackResponse.model_validate(response)
 
     async def start_deployment(
         self, deployment_id: int, request: StartDeployment

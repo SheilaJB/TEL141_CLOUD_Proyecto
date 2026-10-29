@@ -5,53 +5,96 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="cd5adcde-791e-490c-b551-53c6734b93c4" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.gitattributes" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.mvn/wrapper/maven-wrapper.properties" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mvnw" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mvnw.cmd" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/plan.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pom.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/PlacementServiceApplication.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/application/PlacementService.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/application/PlacementServiceImpl.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/Assignment.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/ClusterSnapshot.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/PlacementConstraints.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/PlacementPlan.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/PlacementProblem.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/PlacementResult.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/ResourceAmount.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/VmRequest.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/WorkerSnapshot.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/NoPlacementSolutionException.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/PlacementEngine.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldPlacementConstraintProvider.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldPlacementEngine.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldPlacementMapper.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldSolution.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldVm.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldWorker.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/AvailabilityZoneEntity.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/AvailabilityZoneRepository.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/ClusterEntity.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/ClusterRepository.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/FlavorEntity.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/ServerEntity.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/ServerRepository.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/SliceNodeEntity.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/SliceVersionEntity.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/SliceVersionRepository.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/reservation/ReservationConflictException.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/reservation/ReservationStateException.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/reservation/ResourceReservationService.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/reservation/ResourceReservationServiceImpl.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/snapshot/PlacementSnapshotService.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/snapshot/PlacementSnapshotServiceImpl.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/resources/application.properties" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/test/java/com/example/g3/placementservice/PlacementIntegrationTest.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/test/java/com/example/g3/placementservice/PlacementServiceApplicationTests.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../DB/init.sql" beforeDir="false" afterPath="$PROJECT_DIR$/../../DB/init.sql" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Slice Manager/contracts/contracts/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Slice Manager/contracts/contracts/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Slice Manager/contracts/contracts/placement.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Slice Manager/contracts/contracts/placement.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Slice Manager/contracts/contracts/queues.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Slice Manager/contracts/contracts/queues.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Slice Manager/slice_manager/app/domain/placement_simulator.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Slice Manager/slice_manager/app/domain/slice_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Slice Manager/slice_manager/app/domain/slice_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Slice Manager/slice_manager/app/internal_api/deployments.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Slice Manager/slice_manager/app/internal_api/deployments.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Slice Manager/slice_manager/app/repositories/deployments.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Slice Manager/slice_manager/app/repositories/deployments.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Slice Manager/temporal_worker/worker/activities/registry.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Slice Manager/temporal_worker/worker/activities/registry.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Slice Manager/temporal_worker/worker/activities/slice_manager_client.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Slice Manager/temporal_worker/worker/activities/slice_manager_client.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Slice Manager/temporal_worker/worker/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Slice Manager/temporal_worker/worker/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Slice Manager/temporal_worker/worker/workflows/deploy_workflow.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Slice Manager/temporal_worker/worker/workflows/deploy_workflow.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/plan.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/pom.xml" beforeDir="false" afterPath="$PROJECT_DIR$/pom.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/application/PlacementService.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/application/PlacementService.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/application/PlacementServiceImpl.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/application/PlacementServiceImpl.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/Assignment.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/ClusterSnapshot.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/PlacementConstraints.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/PlacementPlan.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/PlacementProblem.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/PlacementProblem.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/PlacementResult.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/ResourceAmount.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/VmRequest.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/domain/WorkerSnapshot.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/NoPlacementSolutionException.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/NoPlacementSolutionException.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/PlacementEngine.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/PlacementEngine.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldPlacementConstraintProvider.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldPlacementConstraintProvider.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldPlacementEngine.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldPlacementEngine.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldPlacementMapper.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldPlacementMapper.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldSolution.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldSolution.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldVm.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldVm.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldWorker.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/engine/timefold/TimefoldWorker.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/AvailabilityZoneEntity.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/AvailabilityZoneRepository.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/ClusterEntity.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/ClusterRepository.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/FlavorEntity.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/ServerEntity.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/ServerRepository.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/SliceNodeEntity.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/SliceVersionEntity.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/persistence/SliceVersionRepository.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/reservation/ReservationStateException.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/reservation/ReservationStateException.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/reservation/ResourceReservationService.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/reservation/ResourceReservationService.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/reservation/ResourceReservationServiceImpl.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/reservation/ResourceReservationServiceImpl.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/snapshot/PlacementSnapshotService.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/snapshot/PlacementSnapshotService.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/snapshot/PlacementSnapshotServiceImpl.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/snapshot/PlacementSnapshotServiceImpl.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/resources/application.properties" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/resources/application.properties" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/test/java/com/example/g3/placementservice/PlacementIntegrationTest.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/test/java/com/example/g3/placementservice/PlacementServiceApplicationTests.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/application.properties" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/application.properties" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/application/PlacementService.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/application/PlacementService.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/application/PlacementServiceImpl.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/application/PlacementServiceImpl.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/domain/Assignment.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/domain/ClusterSnapshot.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/domain/PlacementConstraints.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/domain/PlacementPlan.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/domain/PlacementProblem.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/domain/PlacementProblem.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/domain/PlacementResult.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/domain/ResourceAmount.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/domain/VmRequest.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/domain/WorkerSnapshot.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/engine/NoPlacementSolutionException.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/engine/NoPlacementSolutionException.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/engine/PlacementEngine.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/engine/PlacementEngine.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/engine/timefold/TimefoldPlacementConstraintProvider.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/engine/timefold/TimefoldPlacementConstraintProvider.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/engine/timefold/TimefoldPlacementEngine.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/engine/timefold/TimefoldPlacementEngine.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/engine/timefold/TimefoldPlacementMapper.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/engine/timefold/TimefoldPlacementMapper.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/engine/timefold/TimefoldSolution.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/engine/timefold/TimefoldSolution.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/engine/timefold/TimefoldVm.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/engine/timefold/TimefoldVm.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/engine/timefold/TimefoldWorker.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/engine/timefold/TimefoldWorker.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/persistence/AvailabilityZoneEntity.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/persistence/AvailabilityZoneRepository.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/persistence/ClusterEntity.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/persistence/ClusterRepository.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/persistence/FlavorEntity.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/persistence/ServerEntity.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/persistence/ServerRepository.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/persistence/SliceNodeEntity.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/persistence/SliceVersionEntity.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/persistence/SliceVersionRepository.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/reservation/ReservationStateException.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/reservation/ReservationStateException.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/reservation/ResourceReservationService.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/reservation/ResourceReservationService.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/reservation/ResourceReservationServiceImpl.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/reservation/ResourceReservationServiceImpl.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/snapshot/PlacementSnapshotService.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/snapshot/PlacementSnapshotService.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/snapshot/PlacementSnapshotServiceImpl.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/example/g3/placementservice/placement/snapshot/PlacementSnapshotServiceImpl.class" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/test-classes/com/example/g3/placementservice/PlacementIntegrationTest.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/target/test-classes/com/example/g3/placementservice/PlacementServiceApplicationTests.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../docker-compose.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/../../docker-compose.yaml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -90,6 +133,8 @@
   </component>
   <component name="PropertiesComponent">{
   &quot;keyToString&quot;: {
+    &quot;JUnit.PlacementAlgorithmTest.consolidatesBelowTheThresholdAndOpensASecondHostAboveIt.executor&quot;: &quot;Run&quot;,
+    &quot;JUnit.PlacementAlgorithmTest.executor&quot;: &quot;Run&quot;,
     &quot;JUnit.PlacementIntegrationTest.executor&quot;: &quot;Debug&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
@@ -108,7 +153,38 @@
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
 }</component>
-  <component name="RunManager" selected="JUnit.PlacementIntegrationTest">
+  <component name="RunManager" selected="JUnit.PlacementAlgorithmTest">
+    <configuration name="PlacementAlgorithmTest" type="JUnit" factoryName="JUnit" temporary="true" nameIsGenerated="true">
+      <module name="placement-service" />
+      <extension name="coverage">
+        <pattern>
+          <option name="PATTERN" value="com.example.g3.placementservice.*" />
+          <option name="ENABLED" value="true" />
+        </pattern>
+      </extension>
+      <option name="PACKAGE_NAME" value="com.example.g3.placementservice" />
+      <option name="MAIN_CLASS_NAME" value="com.example.g3.placementservice.PlacementAlgorithmTest" />
+      <option name="TEST_OBJECT" value="class" />
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="PlacementAlgorithmTest.consolidatesBelowTheThresholdAndOpensASecondHostAboveIt" type="JUnit" factoryName="JUnit" temporary="true" nameIsGenerated="true">
+      <module name="placement-service" />
+      <extension name="coverage">
+        <pattern>
+          <option name="PATTERN" value="com.example.g3.placementservice.*" />
+          <option name="ENABLED" value="true" />
+        </pattern>
+      </extension>
+      <option name="PACKAGE_NAME" value="com.example.g3.placementservice" />
+      <option name="MAIN_CLASS_NAME" value="com.example.g3.placementservice.PlacementAlgorithmTest" />
+      <option name="METHOD_NAME" value="consolidatesBelowTheThresholdAndOpensASecondHostAboveIt" />
+      <option name="TEST_OBJECT" value="method" />
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
     <configuration name="PlacementIntegrationTest" type="JUnit" factoryName="JUnit" temporary="true" nameIsGenerated="true">
       <module name="placement-service" />
       <extension name="coverage">
@@ -135,11 +211,15 @@
       </method>
     </configuration>
     <list>
+      <item itemvalue="JUnit.PlacementAlgorithmTest" />
+      <item itemvalue="JUnit.PlacementAlgorithmTest.consolidatesBelowTheThresholdAndOpensASecondHostAboveIt" />
       <item itemvalue="JUnit.PlacementIntegrationTest" />
       <item itemvalue="Spring Boot.PlacementServiceApplication" />
     </list>
     <recent_temporary>
       <list>
+        <item itemvalue="JUnit.PlacementAlgorithmTest" />
+        <item itemvalue="JUnit.PlacementAlgorithmTest.consolidatesBelowTheThresholdAndOpensASecondHostAboveIt" />
         <item itemvalue="JUnit.PlacementIntegrationTest" />
       </list>
     </recent_temporary>
@@ -168,6 +248,11 @@
       <workItem from="1790142297872" duration="129000" />
       <workItem from="1790142448846" duration="74000" />
       <workItem from="1790142592839" duration="112000" />
+      <workItem from="1792513735160" duration="763000" />
+      <workItem from="1792525711529" duration="2523000" />
+      <workItem from="1793064890660" duration="6606000" />
+      <workItem from="1793141982911" duration="2094000" />
+      <workItem from="1793227428999" duration="1700000" />
     </task>
     <servers />
   </component>
@@ -178,18 +263,8 @@
     <breakpoint-manager>
       <breakpoints>
         <line-breakpoint enabled="true" type="java-line">
-          <url>file://$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/reservation/ResourceReservationServiceImpl.java</url>
-          <line>66</line>
-          <option name="timeStamp" value="1" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" type="java-line">
-          <url>file://$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/reservation/ResourceReservationServiceImpl.java</url>
-          <line>68</line>
-          <option name="timeStamp" value="2" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" type="java-line">
           <url>file://$PROJECT_DIR$/src/main/java/com/example/g3/placementservice/placement/application/PlacementServiceImpl.java</url>
-          <line>33</line>
+          <line>24</line>
           <option name="timeStamp" value="4" />
         </line-breakpoint>
       </breakpoints>

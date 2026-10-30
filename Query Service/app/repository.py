@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 import asyncpg
 from app.schemas import (
     ClusterMetrics,
+    DeploymentSummary,
     FlavorResponse,
     ImageResponse,
     QuotaUsage,
@@ -13,6 +14,7 @@ from app.schemas import (
     SlicePortDetail,
     SliceSummary,
     SliceTopology,
+    TemplateResponse,
     UserAdminView,
     UserQuotaSummary,
     ZoneResponse,
@@ -22,6 +24,10 @@ from app.schemas import (
 class QueryRepository:
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
+
+    # -------------------------------------------------------------------------
+    # Catálogos (Flavors, Imágenes, Zonas, Plantillas)
+    # -------------------------------------------------------------------------
 
     async def list_flavors(self, active_only: bool = True) -> List[FlavorResponse]:
         query = """
@@ -91,6 +97,43 @@ class QueryRepository:
             )
             for r in rows
         ]
+
+    async def list_templates(
+        self, user_id: Optional[int] = None
+    ) -> List[TemplateResponse]:
+        if user_id is not None:
+            query = """
+                SELECT id, dueño_id, nombre, spec
+                FROM slices.plantilla
+                WHERE dueño_id IS NULL OR dueño_id = $1
+                ORDER BY id ASC
+            """
+            rows = await self.pool.fetch(query, user_id)
+        else:
+            query = """
+                SELECT id, dueño_id, nombre, spec
+                FROM slices.plantilla
+                ORDER BY id ASC
+            """
+            rows = await self.pool.fetch(query)
+
+        results = []
+        for r in rows:
+            raw_spec = r["spec"]
+            spec_dict = json.loads(raw_spec) if isinstance(raw_spec, str) else raw_spec
+            results.append(
+                TemplateResponse(
+                    id=r["id"],
+                    dueño_id=r["dueño_id"],
+                    nombre=r["nombre"],
+                    spec=spec_dict or {},
+                )
+            )
+        return results
+
+    # -------------------------------------------------------------------------
+    # Cuotas de Usuario
+    # -------------------------------------------------------------------------
 
     async def get_user_quota(self, user_id: int) -> UserQuotaSummary:
         user_row = await self.pool.fetchrow(
@@ -201,6 +244,10 @@ class QueryRepository:
             cuotas=cuotas,
         )
 
+    # -------------------------------------------------------------------------
+    # Slices y Topología
+    # -------------------------------------------------------------------------
+
     async def list_slices(
         self,
         user_id: Optional[int] = None,
@@ -223,17 +270,24 @@ class QueryRepository:
         where_clause = " AND ".join(conditions)
         query = f"""
             SELECT s.id, s.nombre, s.estado, s.zona_id, z.nombre AS zona_nombre,
-                   s.vlan_s, s.version_activa_id, sv.numero_version AS version_activa_numero,
+                   s.cluster_id, c.nombre AS cluster_nombre,
+                   s.vlan_stag, s.version_activa_id, sv.numero_version AS version_activa_numero,
                    s.usuario_id, s.fecha_creacion, s.fecha_modificacion
             FROM slices.slice s
             LEFT JOIN slices.zona_disponibilidad z ON s.zona_id = z.id
+            LEFT JOIN slices.cluster c ON s.cluster_id = c.id
             LEFT JOIN slices.slice_version sv ON s.version_activa_id = sv.id
             WHERE {where_clause}
             ORDER BY s.id DESC
         """
 
         rows = await self.pool.fetch(query, *params)
-        return [SliceSummary(**dict(r)) for r in rows]
+        results = []
+        for r in rows:
+            d = dict(r)
+            d["vlan_s"] = d.get("vlan_stag")
+            results.append(SliceSummary(**d))
+        return results
 
     async def get_slice_detail(
         self,
@@ -249,16 +303,22 @@ class QueryRepository:
 
         query = f"""
             SELECT s.id, s.nombre, s.estado, s.zona_id, z.nombre AS zona_nombre,
-                   s.vlan_s, s.version_activa_id, sv.numero_version AS version_activa_numero,
+                   s.cluster_id, c.nombre AS cluster_nombre,
+                   s.vlan_stag, s.version_activa_id, sv.numero_version AS version_activa_numero,
                    s.usuario_id, s.fecha_creacion, s.fecha_modificacion
             FROM slices.slice s
             LEFT JOIN slices.zona_disponibilidad z ON s.zona_id = z.id
+            LEFT JOIN slices.cluster c ON s.cluster_id = c.id
             LEFT JOIN slices.slice_version sv ON s.version_activa_id = sv.id
             WHERE {" AND ".join(conditions)}
         """
 
         row = await self.pool.fetchrow(query, *params)
-        return SliceSummary(**dict(row)) if row else None
+        if not row:
+            return None
+        d = dict(row)
+        d["vlan_s"] = d.get("vlan_stag")
+        return SliceSummary(**d)
 
     async def get_slice_topology(
         self,
@@ -294,27 +354,33 @@ class QueryRepository:
                 SELECT sn.id::text, sn.name, sn.flavor_id, f.name AS flavor_name,
                        f.vcpu, f.vram_mb, f.vdisk_mb,
                        sn.imagen_id, img.nombre AS imagen_nombre,
-                       sn.estado_nodo, sn.pid, sn.puerto_vnc,
-                       rn.servidor_id, srv.ip_serv::text AS servidor_ip
+                       sn.estado_nodo, sn.public_access, sn.pid,
+                       sn.vnc_display, sn.deployment_id,
+                       COALESCE(sn.server_id, rn.servidor_id) AS servidor_id,
+                       srv.ip_serv::text AS servidor_ip
                 FROM slices.slice_nodo sn
                 JOIN slices.flavor f ON sn.flavor_id = f.id
                 JOIN slices.image img ON sn.imagen_id = img.id
                 LEFT JOIN slices.reserva_nodo rn
                        ON rn.nodo_id = sn.id AND rn.estado = 'RESERVED' AND rn.recurso = 'vcpu'
-                LEFT JOIN slices.servidor srv ON rn.servidor_id = srv.id
+                LEFT JOIN slices.servidor srv
+                       ON srv.id = COALESCE(sn.server_id, rn.servidor_id)
                 WHERE sn.defin_version_id = $1
                 ORDER BY sn.name ASC
                 """,
                 version_id,
             )
             for nr in node_rows:
-                nodes.append(SliceNodeDetail(**dict(nr)))
+                d = dict(nr)
+                d["puerto_vnc"] = d.get("vnc_display")
+                nodes.append(SliceNodeDetail(**d))
 
         links: List[SliceLinkDetail] = []
         if version_id:
             link_rows = await self.pool.fetch(
                 """
-                SELECT se.id::text, se.name
+                SELECT se.id::text, se.name, se.public,
+                       se.cidr::text, se.vlan_ctag, se.estado, se.deployment_id
                 FROM slices.slice_enlace se
                 WHERE se.defin_version_id = $1
                 ORDER BY se.name ASC
@@ -324,15 +390,16 @@ class QueryRepository:
 
             port_rows = await self.pool.fetch(
                 """
-                SELECT sep.id::text, sep.enlace_id::text, sep.name,
+                SELECT sep.id::text, sep.enlace_id::text,
                        sep.nodo_id::text, sn.name AS nodo_name,
-                       sep.public, sep.mac::text, sep.ip::text,
-                       sep.vlan_tag, sep.ns
+                       sep.public, sep.nic_index,
+                       sep.mac::text, sep.ip::text,
+                       sep.estado, sep.deployment_id
                 FROM slices.slice_enlace_puerto sep
                 JOIN slices.slice_enlace se ON sep.enlace_id = se.id
                 JOIN slices.slice_nodo sn ON sep.nodo_id = sn.id
                 WHERE se.defin_version_id = $1
-                ORDER BY sep.name ASC
+                ORDER BY sep.nic_index ASC NULLS LAST, sep.id ASC
                 """,
                 version_id,
             )
@@ -342,14 +409,15 @@ class QueryRepository:
                 lid = pr["enlace_id"]
                 p_detail = SlicePortDetail(
                     id=pr["id"],
-                    name=pr["name"],
+                    enlace_id=pr["enlace_id"],
                     nodo_id=pr["nodo_id"],
                     nodo_name=pr["nodo_name"],
                     public=pr["public"],
+                    nic_index=pr["nic_index"],
                     mac=pr["mac"],
                     ip=pr["ip"],
-                    vlan_tag=pr["vlan_tag"],
-                    ns=pr["ns"],
+                    estado=pr["estado"],
+                    deployment_id=pr["deployment_id"],
                 )
                 ports_by_link.setdefault(lid, []).append(p_detail)
 
@@ -359,6 +427,11 @@ class QueryRepository:
                     SliceLinkDetail(
                         id=lid,
                         name=lr["name"],
+                        public=lr["public"],
+                        cidr=lr["cidr"],
+                        vlan_ctag=lr["vlan_ctag"],
+                        estado=lr["estado"],
+                        deployment_id=lr["deployment_id"],
                         puertos=ports_by_link.get(lid, []),
                     )
                 )
@@ -368,13 +441,21 @@ class QueryRepository:
             nombre=slice_info.nombre,
             estado=slice_info.estado,
             zona_id=slice_info.zona_id,
-            vlan_s=slice_info.vlan_s,
+            zona_nombre=slice_info.zona_nombre,
+            cluster_id=slice_info.cluster_id,
+            cluster_nombre=slice_info.cluster_nombre,
+            vlan_stag=slice_info.vlan_stag,
+            vlan_s=slice_info.vlan_stag,
             version_id=version_id,
             numero_version=version_num,
             spec=spec_dict,
             nodos=nodes,
             enlaces=links,
         )
+
+    # -------------------------------------------------------------------------
+    # Solicitudes de Aprobación y Despliegues
+    # -------------------------------------------------------------------------
 
     async def list_requests(
         self,
@@ -411,6 +492,96 @@ class QueryRepository:
 
         rows = await self.pool.fetch(query, *params)
         return [RequestSummary(**dict(r)) for r in rows]
+
+    async def list_deployments(
+        self,
+        user_id: Optional[int] = None,
+        slice_id: Optional[int] = None,
+        estado: Optional[str] = None,
+    ) -> List[DeploymentSummary]:
+        conditions = []
+        params = []
+        idx = 1
+
+        if user_id is not None:
+            conditions.append(f"d.solicitado_por = ${idx}")
+            params.append(user_id)
+            idx += 1
+
+        if slice_id is not None:
+            conditions.append(f"d.slice_id = ${idx}")
+            params.append(slice_id)
+            idx += 1
+
+        if estado is not None:
+            conditions.append(f"d.estado = ${idx}")
+            params.append(estado.upper())
+            idx += 1
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        query = f"""
+            SELECT d.id, d.slice_id, s.nombre AS slice_nombre,
+                   d.origin_version_id, d.target_version_id,
+                   d.tipo, d.estado, d.workflow_id,
+                   d.plan, d.error, d.solicitado_por,
+                   u.codigo AS solicitado_por_codigo,
+                   d.created_at, d.finished_at
+            FROM slices.deployment d
+            JOIN slices.slice s ON d.slice_id = s.id
+            JOIN auth.usuario u ON d.solicitado_por = u.id
+            {where_clause}
+            ORDER BY d.id DESC
+        """
+
+        rows = await self.pool.fetch(query, *params)
+        results = []
+        for r in rows:
+            d = dict(r)
+            if isinstance(d.get("plan"), str):
+                d["plan"] = json.loads(d["plan"])
+            if isinstance(d.get("error"), str):
+                d["error"] = json.loads(d["error"])
+            results.append(DeploymentSummary(**d))
+        return results
+
+    async def get_deployment_detail(
+        self,
+        deployment_id: int,
+        user_id: Optional[int] = None,
+    ) -> Optional[DeploymentSummary]:
+        conditions = ["d.id = $1"]
+        params = [deployment_id]
+
+        if user_id is not None:
+            conditions.append("d.solicitado_por = $2")
+            params.append(user_id)
+
+        query = f"""
+            SELECT d.id, d.slice_id, s.nombre AS slice_nombre,
+                   d.origin_version_id, d.target_version_id,
+                   d.tipo, d.estado, d.workflow_id,
+                   d.plan, d.error, d.solicitado_por,
+                   u.codigo AS solicitado_por_codigo,
+                   d.created_at, d.finished_at
+            FROM slices.deployment d
+            JOIN slices.slice s ON d.slice_id = s.id
+            JOIN auth.usuario u ON d.solicitado_por = u.id
+            WHERE {" AND ".join(conditions)}
+        """
+
+        row = await self.pool.fetchrow(query, *params)
+        if not row:
+            return None
+        d = dict(row)
+        if isinstance(d.get("plan"), str):
+            d["plan"] = json.loads(d["plan"])
+        if isinstance(d.get("error"), str):
+            d["error"] = json.loads(d["error"])
+        return DeploymentSummary(**d)
+
+    # -------------------------------------------------------------------------
+    # Vistas de Servidores, Usuarios y Métricas
+    # -------------------------------------------------------------------------
 
     async def list_servers(self) -> List[ServerDetail]:
         query = """

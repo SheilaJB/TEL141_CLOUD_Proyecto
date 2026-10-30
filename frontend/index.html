@@ -1,261 +1,529 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" class="h-full bg-slate-50">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orquestador Cloud PUCP</title>
+    <title>Orquestador Cloud PUCP — TEL141</title>
+
+    <!-- Tailwind CSS (CDN oficial) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Cytoscape.js (CDN oficial para grafos de red) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+
+    <!-- Iconos Lucide (CDN oficial) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
     <style>
-        :root {
-            --primary-color: #003a6c; /* Azul PUCP */
-            --bg-color: #f4f7f6;
-            --card-bg: #ffffff;
-            --text-color: #333;
-        }
+        /* Personalización de tipografía y barras de scroll */
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
         }
-        .container {
-            background-color: var(--card-bg);
-            padding: 40px;
-            border-radius: 10px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            width: 100%;
-            max-width: 400px;
-            text-align: center;
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
         }
-        h1 {
-            color: var(--primary-color);
-            font-size: 24px;
-            margin-bottom: 10px;
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
         }
-        p.subtitle {
-            color: #666;
-            margin-bottom: 30px;
-            font-size: 14px;
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
         }
-        .form-group {
-            margin-bottom: 20px;
-            text-align: left;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            font-size: 14px;
-        }
-        .form-group input {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            box-sizing: border-box;
-            font-size: 14px;
-        }
-        button {
-            width: 100%;
-            padding: 12px;
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            border-radius: 5px;
-            font-size: 16px;
-            cursor: pointer;
-            transition: background-color 0.3s;
-            margin-bottom: 10px;
-        }
-        button:hover {
-            background-color: #00284d;
-        }
-        button.secondary {
-            background-color: #6c757d;
-        }
-        button.secondary:hover {
-            background-color: #5a6268;
-        }
-        .error {
-            color: #dc3545;
-            font-size: 14px;
-            margin-top: 15px;
-            display: none;
-        }
-        .success-box {
-            background-color: #d4edda;
-            color: #155724;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-            font-size: 14px;
-            text-align: left;
-            word-wrap: break-word;
-        }
-        .hidden {
-            display: none;
-        }
-        #verify-result {
-            margin-top: 15px;
-            font-size: 13px;
-            background: #e9ecef;
-            padding: 10px;
-            border-radius: 5px;
-            text-align: left;
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
         }
     </style>
 </head>
-<body>
+<body class="h-full flex flex-col text-slate-800 antialiased selection:bg-blue-900 selection:text-white">
 
-    <!-- PANTALLA DE LOGIN -->
-    <div class="container" id="login-view">
-        <h1>Orquestador Cloud PUCP</h1>
-        <p class="subtitle">Acceso a la plataforma</p>
-        
-        <form id="login-form">
-            <div class="form-group">
-                <label for="username">Código de Usuario</label>
-                <input type="text" id="username" placeholder="ej. admin_pucp" required>
+    <!-- ================================================================= -->
+    <!-- 1. VISTA DE INICIO DE SESIÓN (LOGIN)                              -->
+    <!-- ================================================================= -->
+    <div id="view-login" class="flex-1 flex items-center justify-center p-4">
+        <div class="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+            <!-- Encabezado con identidad PUCP -->
+            <div class="bg-blue-950 p-6 text-center text-white">
+                <div class="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center mx-auto mb-3">
+                    <i data-lucide="cloud" class="w-6 h-6 text-blue-200"></i>
+                </div>
+                <h1 class="text-xl font-bold tracking-tight">Orquestador Cloud PUCP</h1>
             </div>
-            <div class="form-group">
-                <label for="password">Contraseña</label>
-                <input type="password" id="password" placeholder="••••••••" required>
-            </div>
-            <button type="submit" id="btn-login">Ingresar</button>
-            <div id="login-error" class="error">Credenciales incorrectas o error de red.</div>
-        </form>
-    </div>
 
-    <!-- PANTALLA DE DASHBOARD (Panel de Control) -->
-    <div class="container hidden" id="dashboard-view">
-        <h1>Orquestador Cloud PUCP</h1>
-        <p class="subtitle">Bienvenido al Panel de Control</p>
+            <!-- Formulario de Acceso -->
+            <form id="login-form" class="p-6 space-y-4">
+                <div id="login-error" class="hidden p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-xs font-medium"></div>
 
-        <div class="success-box" id="user-info">
-            <!-- Aquí inyectaremos los datos del JWT -->
+                <div>
+                    <label for="login-codigo" class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+                        Código de Usuario
+                    </label>
+                    <input 
+                        type="text" 
+                        id="login-codigo" 
+                        placeholder="Ej. 20260001 (Básico) o 20260002 (Avanzado)" 
+                        required
+                        class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900 focus:border-transparent transition"
+                    >
+                </div>
+
+                <div>
+                    <label for="login-password" class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+                        Contraseña
+                    </label>
+                    <input 
+                        type="password" 
+                        id="login-password" 
+                        placeholder="••••••••" 
+                        required
+                        class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900 focus:border-transparent transition"
+                    >
+                </div>
+
+                <button 
+                    type="submit" 
+                    id="btn-login"
+                    class="w-full bg-blue-900 hover:bg-blue-950 text-white font-bold py-2.5 px-4 rounded-lg text-xs uppercase tracking-wider transition shadow-sm"
+                >
+                    INGRESAR
+                </button>
+
+                <div class="pt-2 text-center text-xs text-slate-400">
+                    Conexión perimetral autenticada mediante API Gateway (RS256)
+                </div>
+            </form>
         </div>
-
-        <button id="btn-verify">Probar conexión con API Gateway (Verify)</button>
-        <div id="verify-result" class="hidden"></div>
-        <br>
-        <button class="secondary" id="btn-logout">Cerrar Sesión</button>
     </div>
 
+    <!-- ================================================================= -->
+    <!-- 2. VISTA PRINCIPAL DEL USUARIO (DASHBOARD)                       -->
+    <!-- ================================================================= -->
+    <div id="view-dashboard" class="hidden flex-1 flex flex-col">
+        <!-- Barra de Navegación Superior -->
+        <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <div class="w-9 h-9 bg-blue-950 rounded-lg flex items-center justify-center text-white font-bold">
+                        <i data-lucide="cloud" class="w-5 h-5 text-blue-300"></i>
+                    </div>
+                    <div>
+                        <span class="font-bold text-slate-900 text-sm tracking-tight">Orquestador Cloud PUCP</span>
+                    </div>
+                </div>
+
+                <!-- Perfil y Acciones -->
+                <div class="flex items-center space-x-3">
+                    <div class="flex items-center space-x-2 bg-slate-100 py-1.5 px-3 rounded-lg border border-slate-200">
+                        <span class="text-xs font-bold text-slate-800" id="nav-user-codigo">Usuario</span>
+                        <span id="nav-user-nivel" class="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300">
+                            NIVEL BÁSICO
+                        </span>
+                    </div>
+
+
+                    <button 
+                        type="button" 
+                        id="btn-refresh-all" 
+                        class="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition flex items-center space-x-1"
+                        title="Actualizar datos de solo lectura desde el Query Service"
+                    >
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                        <span>ACTUALIZAR</span>
+                    </button>
+
+                    <button 
+                        type="button" 
+                        id="btn-logout" 
+                        class="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition flex items-center space-x-1"
+                    >
+                        <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
+                        <span>SALIR</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Contenido Central -->
+        <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+            
+            <!-- Medidores de Cuota en Tiempo Real (Solo Consumidor) -->
+            <section id="section-quotas">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500">
+                        Cuotas Asignadas a tu Nivel
+                    </h2>
+                </div>
+                <div id="quotas-container" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <!-- Inyectado por quotas.js -->
+                </div>
+            </section>
+
+            <!-- Panel Resumen Operativo para Operador -->
+            <section id="section-operator-summary" class="hidden">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs font-semibold uppercase tracking-wider text-amber-700 font-bold">Solicitudes Pendientes</span>
+                            <span id="op-pending-badge" class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">0 PENDIENTES</span>
+                        </div>
+                        <div class="text-2xl font-bold text-slate-900" id="op-pending-count">0</div>
+                        <p class="text-xs text-slate-400 mt-1">Requieren decisión de aprobación o rechazo en la plataforma.</p>
+                    </div>
+
+                    <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs font-semibold uppercase tracking-wider text-emerald-700 font-bold">Slices en Ejecución</span>
+                            <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">ACTIVOS</span>
+                        </div>
+                        <div class="text-2xl font-bold text-slate-900" id="op-running-count">0</div>
+                        <p class="text-xs text-slate-400 mt-1">Slices actualmente desplegados y corriendo en los hipervisores.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Pestañas Principales -->
+            <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <!-- Barra de Pestañas -->
+                <div class="border-b border-slate-200 bg-slate-50/50 px-4 pt-3 flex space-x-2" id="tabs-bar">
+                    <button type="button" data-tab="drafts" id="tab-btn-drafts" class="tab-btn pb-3 px-4 text-xs font-bold uppercase tracking-wider text-blue-900 border-b-2 border-blue-900">
+                        1. Mis Borradores
+                    </button>
+                    <button type="button" data-tab="requests" id="tab-btn-requests" class="tab-btn pb-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700 border-b-2 border-transparent">
+                        2. Mis Solicitudes
+                    </button>
+                    <button type="button" data-tab="slices" id="tab-btn-slices" class="tab-btn pb-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700 border-b-2 border-transparent">
+                        3. Slices Activos
+                    </button>
+                    <button type="button" data-tab="infra" id="tab-btn-infra" class="tab-btn pb-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700 border-b-2 border-transparent">
+                        4. Catálogo de Recursos
+                    </button>
+                </div>
+
+                <div class="p-6">
+                    <!-- PANE 1: MIS BORRADORES -->
+                    <div id="tab-pane-drafts" class="space-y-4">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="text-sm font-bold text-slate-900">Borradores (DRAFT)</h3>
+                                <p class="text-xs text-slate-500">Diseña y modifica la topología antes de enviarla a validación y despliegue.</p>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <input type="file" id="file-import-json" accept=".json" class="hidden">
+                                <button type="button" id="btn-import-draft" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition">
+                                    IMPORTAR
+                                </button>
+                                <button type="button" id="btn-new-draft" class="bg-blue-900 hover:bg-blue-950 text-white px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition shadow-sm">
+                                    CREAR
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="drafts-table-container">
+                            <!-- Inyectado por drafts.js -->
+                        </div>
+                    </div>
+
+                    <!-- PANE 2: MIS SOLICITUDES -->
+                    <div id="tab-pane-requests" class="hidden space-y-4">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-900">Historial y Estado de Solicitudes</h3>
+                            <p class="text-xs text-slate-500">Supervisa las solicitudes enviadas a evaluación por el operador o aprobadas automáticamente.</p>
+                        </div>
+                        <div id="requests-table-container">
+                            <!-- Inyectado por requests.js -->
+                        </div>
+                    </div>
+
+                    <!-- PANE 3: SLICES ACTIVOS -->
+                    <div id="tab-pane-slices" class="hidden space-y-4">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-900">Slices Desplegados en Infraestructura</h3>
+                            <p class="text-xs text-slate-500">Recursos físicos operativos. Puedes consultar la topología viva y credenciales de acceso VNC.</p>
+                        </div>
+                        <div id="slices-table-container">
+                            <!-- Inyectado por slices.js -->
+                        </div>
+                    </div>
+
+                    <!-- PANE 4: INFRAESTRUCTURA Y CATÁLOGO -->
+                    <div id="tab-pane-infra" class="hidden space-y-6">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-900">Infraestructura Física y Catálogo de la Plataforma</h3>
+                            <p class="text-xs text-slate-500">Supervisa los hipervisores físicos de cómputo, zonas de disponibilidad y sabores configurados en PostgreSQL.</p>
+                        </div>
+                        <div id="infra-container">
+                            <!-- Inyectado por app.js -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- 3. MODAL WIZARD: DISEÑADOR DE BORRADORES Y TOPOLOGÍA              -->
+    <!-- ================================================================= -->
+    <div id="wizard-modal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-5xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+            <!-- Encabezado del Wizard -->
+            <div class="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                <div>
+                    <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider">Diseñador de Topología y Borradores</h3>
+                    <span class="text-xs text-slate-500">Generador asistido con layouts deterministas</span>
+                </div>
+                <button type="button" id="wizard-close-btn" class="text-slate-400 hover:text-slate-700 font-bold text-xl px-2">
+                    &times;
+                </button>
+            </div>
+
+            <!-- Cuerpo en Dos Columnas -->
+            <div class="flex-1 grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-200 overflow-hidden">
+                <!-- Columna Izquierda: Formulario Asistido -->
+                <div id="wizard-form-container" class="p-4 overflow-y-auto max-h-[68vh]">
+                    <!-- Inyectado por wizard.js -->
+                </div>
+
+                <!-- Columna Derecha: Lienzo Cytoscape en Vivo -->
+                <div class="flex flex-col bg-slate-50/70 p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs font-bold uppercase tracking-wider text-slate-600">Previsualización Gráfica</span>
+                        <span class="text-xs text-slate-400">Actualización en vivo</span>
+                    </div>
+                    <div id="wizard-cytoscape-container" class="flex-1 bg-white rounded-xl border border-slate-200 shadow-inner min-h-[350px]">
+                        <!-- Canvas Cytoscape -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Barra Inferior de Acciones -->
+            <div class="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+                <span class="text-xs text-slate-400">El borrador no afectará infraestructura física hasta pulsar DESPLEGAR</span>
+                <div class="flex items-center space-x-2">
+                    <button type="button" id="wizard-save-btn" class="bg-slate-200 hover:bg-slate-300 text-slate-800 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition">
+                        GUARDAR
+                    </button>
+                    <button type="button" id="wizard-deploy-btn" class="bg-emerald-700 hover:bg-emerald-800 text-white px-5 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                        DESPLEGAR
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- 4. MODAL: TOPOLOGÍA EN VIVO Y ACCESO VNC                         -->
+    <!-- ================================================================= -->
+    <div id="topology-modal" class="hidden fixed inset-0 z-50 overflow-hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-6xl w-full h-[88vh] shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+            <!-- Barra Superior del Visor -->
+            <div class="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                <div>
+                    <h3 id="topo-modal-title" class="text-sm font-bold text-slate-900 uppercase tracking-wider">Topología en Vivo</h3>
+                    <span class="text-xs text-slate-500">Nodos activos, asignación de hipervisores físicos y datos de consola</span>
+                </div>
+
+                <div class="flex items-center space-x-3">
+                    <label class="flex items-center space-x-1.5 text-xs text-slate-600 cursor-pointer">
+                        <input type="checkbox" id="topo-toggle-details" checked class="rounded text-blue-900 focus:ring-0">
+                        <span class="font-medium">Detalles de Red (VLAN/CIDR)</span>
+                    </label>
+
+                    <button type="button" id="topo-export-png" class="bg-slate-200 hover:bg-slate-300 text-slate-800 px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition">
+                        EXPORTAR
+                    </button>
+
+                    <button type="button" id="topo-close-btn" class="text-slate-400 hover:text-slate-700 font-bold text-xl px-2">
+                        &times;
+                    </button>
+                </div>
+            </div>
+
+            <!-- Área Central del Grafo y Drawer Lateral -->
+            <div class="flex-1 relative overflow-hidden bg-slate-50/50">
+                <!-- Lienzo Cytoscape a Pantalla Completa -->
+                <div id="active-cytoscape-container" class="w-full h-full"></div>
+
+                <!-- Panel Lateral Deslizante (Ficha de la VM seleccionada) -->
+                <div id="node-detail-drawer" class="hidden absolute top-4 right-4 w-80 bg-white rounded-xl shadow-xl border border-slate-200 overflow-hidden z-20">
+                    <!-- Inyectado por slices.js -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- 4. MODAL: REVISIÓN TÉCNICA DE SOLICITUD (OPERADOR / DETALLES)    -->
+    <!-- ================================================================= -->
+    <div id="modal-request-review" class="hidden fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-5xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
+            <!-- Encabezado del Modal -->
+            <div class="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                <div>
+                    <h3 id="review-modal-title" class="text-sm font-bold text-slate-900 uppercase tracking-wider">
+                        Revisión Técnica de Solicitud
+                    </h3>
+                    <span id="review-modal-subtitle" class="text-xs text-slate-500">
+                        Topología de red, especificación de VMs y balance de recursos solicitados
+                    </span>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <span id="review-modal-badge" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                        PENDIENTE
+                    </span>
+                    <button type="button" id="review-modal-close-btn" class="text-slate-400 hover:text-slate-700 font-bold text-xl px-2">
+                        &times;
+                    </button>
+                </div>
+            </div>
+
+            <!-- Contenido con Scroll -->
+            <div class="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
+                <!-- Ficha de Solicitud y Métricas de Recursos -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- Datos Generales -->
+                    <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                        <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wide">Datos del Requerimiento</h4>
+                        <div class="grid grid-cols-2 gap-2 text-slate-600">
+                            <div><span class="text-slate-400">Slice:</span> <span id="review-slice-name" class="font-bold text-slate-900">-</span></div>
+                            <div><span class="text-slate-400">Solicitante:</span> <span id="review-user-code" class="font-mono font-bold text-blue-900">-</span></div>
+                            <div><span class="text-slate-400">Operación:</span> <span id="review-op-type" class="font-semibold text-slate-800">-</span></div>
+                            <div><span class="text-slate-400">Fecha:</span> <span id="review-date" class="text-slate-700">-</span></div>
+                            <div><span class="text-slate-400">Zona:</span> <span id="review-zone" class="text-slate-700">-</span></div>
+                            <div><span class="text-slate-400">VLAN Asignada:</span> <span id="review-vlan" class="font-mono text-slate-700">-</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Balance de Recursos Solicitados -->
+                    <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                        <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wide">Recursos Totales Solicitados</h4>
+                        <div class="grid grid-cols-3 gap-2 text-center">
+                            <div class="bg-white p-2.5 rounded-lg border border-slate-200">
+                                <span class="text-[10px] uppercase font-bold text-slate-400 block">vCPUs</span>
+                                <span id="review-res-vcpu" class="text-base font-bold text-blue-900">0</span>
+                            </div>
+                            <div class="bg-white p-2.5 rounded-lg border border-slate-200">
+                                <span class="text-[10px] uppercase font-bold text-slate-400 block">RAM</span>
+                                <span id="review-res-ram" class="text-base font-bold text-blue-900">0 MB</span>
+                            </div>
+                            <div class="bg-white p-2.5 rounded-lg border border-slate-200">
+                                <span class="text-[10px] uppercase font-bold text-slate-400 block">Disco</span>
+                                <span id="review-res-disk" class="text-base font-bold text-blue-900">0 MB</span>
+                            </div>
+                        </div>
+                        <div class="flex justify-between text-slate-500 pt-1 text-[11px]">
+                            <span>Máquinas Virtuales: <strong id="review-count-vms" class="text-slate-800">0</strong></span>
+                            <span>Enlaces de Red: <strong id="review-count-links" class="text-slate-800">0</strong></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Topología Visual con Cytoscape -->
+                <div>
+                    <div class="flex items-center justify-between mb-2">
+                        <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wide">Topología Diseñada</h4>
+                        <span class="text-[11px] text-slate-400">Diagrama interactivo (zoom y arrastre disponibles)</span>
+                    </div>
+                    <div id="review-cytoscape-container" class="w-full h-64 bg-slate-100 rounded-xl border border-slate-200 relative overflow-hidden">
+                        <!-- Cytoscape canvas -->
+                    </div>
+                </div>
+
+                <!-- Detalle de VMs y Enlaces en 2 columnas -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- Tabla de VMs -->
+                    <div class="space-y-2">
+                        <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wide">Máquinas Virtuales (VMs)</h4>
+                        <div class="border border-slate-200 rounded-xl overflow-hidden bg-white max-h-48 overflow-y-auto">
+                            <table class="w-full text-left border-collapse text-[11px]">
+                                <thead>
+                                    <tr class="bg-slate-100 border-b border-slate-200 text-slate-600 font-semibold sticky top-0">
+                                        <th class="p-2">Nombre</th>
+                                        <th class="p-2">Sabor (Flavor)</th>
+                                        <th class="p-2">SO</th>
+                                        <th class="p-2 text-center">Pública</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="review-vms-table-body">
+                                    <!-- Inyectado dinámicamente -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Tabla de Enlaces -->
+                    <div class="space-y-2">
+                        <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wide">Enlaces de Red (Links)</h4>
+                        <div class="border border-slate-200 rounded-xl overflow-hidden bg-white max-h-48 overflow-y-auto">
+                            <table class="w-full text-left border-collapse text-[11px]">
+                                <thead>
+                                    <tr class="bg-slate-100 border-b border-slate-200 text-slate-600 font-semibold sticky top-0">
+                                        <th class="p-2">Nombre Enlace</th>
+                                        <th class="p-2">Extremos Conectados</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="review-links-table-body">
+                                    <!-- Inyectado dinámicamente -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Historial / Motivo si ya fue evaluada -->
+                <div id="review-evaluated-section" class="hidden bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
+                    <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wide">Resolución de Evaluación</h4>
+                    <p class="text-slate-700" id="review-evaluated-text"></p>
+                </div>
+
+                <!-- Panel de Decisión del Operador (Solo para Operador/Admin y si está PENDING) -->
+                <div id="review-operator-decision-panel" class="hidden bg-amber-50/70 p-4 rounded-xl border border-amber-200 space-y-3">
+                    <h4 class="font-bold text-amber-900 text-xs uppercase tracking-wide flex items-center">
+                        <span class="w-2 h-2 rounded-full bg-amber-500 mr-2"></span>
+                        Decisión del Operador de Plataforma
+                    </h4>
+                    <p class="text-[11px] text-amber-800">
+                        Como operador responsable, evalúa la topología, la configuración de las VMs y los recursos solicitados. Puedes aprobar la solicitud para autorizar el aprovisionamiento, o rechazarla sustentando el motivo técnico.
+                    </p>
+                    <div>
+                        <label for="review-decision-reason" class="block font-semibold text-slate-700 text-[11px] mb-1">
+                            Observaciones / Motivo de Rechazo (Obligatorio en caso de rechazar):
+                        </label>
+                        <textarea 
+                            id="review-decision-reason" 
+                            rows="2" 
+                            placeholder="Ej. La topología excede la memoria disponible en el rack o requiere ajustar la distribución de interfaces..."
+                            class="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-900"
+                        ></textarea>
+                    </div>
+                    <div class="flex justify-end space-x-2 pt-1">
+                        <button type="button" id="btn-review-reject" class="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded-lg text-xs uppercase tracking-wider transition">
+                            RECHAZAR SOLICITUD
+                        </button>
+                        <button type="button" id="btn-review-approve" class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-5 py-2 rounded-lg text-xs uppercase tracking-wider transition shadow-sm">
+                            APROBAR SOLICITUD
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pie del Modal -->
+            <div class="p-4 border-t border-slate-200 bg-slate-50 flex justify-end">
+                <button type="button" id="review-modal-close-bottom-btn" class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold px-4 py-2 rounded-lg text-xs uppercase tracking-wider transition">
+                    CERRAR
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script de Inicialización de Iconos Lucide -->
     <script>
-        // CONFIGURACIÓN: Apuntamos al API GATEWAY por HTTPS en puerto 8443
-        const API_GATEWAY_URL = "https://localhost:8443";
-
-        // Elementos del DOM
-        const loginView = document.getElementById('login-view');
-        const dashboardView = document.getElementById('dashboard-view');
-        const loginForm = document.getElementById('login-form');
-        const loginError = document.getElementById('login-error');
-        const userInfoBox = document.getElementById('user-info');
-        const btnVerify = document.getElementById('btn-verify');
-        const verifyResult = document.getElementById('verify-result');
-        const btnLogout = document.getElementById('btn-logout');
-
-        // Al cargar la página, revisar si ya tenemos un token guardado
-        window.onload = () => {
-            const token = localStorage.getItem("jwt_token");
-            if (token) {
-                showDashboard();
-            }
-        };
-
-        // LÓGICA DE INICIO DE SESIÓN
-        loginForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            loginError.style.display = 'none';
-            const btn = document.getElementById('btn-login');
-            btn.innerText = "Conectando...";
-
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-
-            try {
-                // Hacemos FETCH hacia el API Gateway
-                const response = await fetch(`${API_GATEWAY_URL}/auth/login`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    // Guardamos el token en el almacenamiento del navegador
-                    localStorage.setItem("jwt_token", data.access_token);
-                    localStorage.setItem("user_role", data.rol);
-                    localStorage.setItem("user_level", data.nivel || 'N/A');
-                    showDashboard();
-                } else {
-                    loginError.innerText = "Credenciales incorrectas.";
-                    loginError.style.display = 'block';
-                }
-            } catch (error) {
-                console.error("Error:", error);
-                loginError.innerText = "Error de red. ¿Está encendido el API Gateway?";
-                loginError.style.display = 'block';
-            } finally {
-                btn.innerText = "Ingresar";
-            }
+        document.addEventListener("DOMContentLoaded", () => {
+            if (window.lucide) window.lucide.createIcons();
         });
-
-        // LÓGICA DEL BOTÓN VERIFICAR (Ruta protegida)
-        btnVerify.addEventListener('click', async () => {
-            const token = localStorage.getItem("jwt_token");
-            verifyResult.classList.remove('hidden');
-            verifyResult.innerHTML = "<i>Consultando al API Gateway...</i>";
-
-            try {
-                const response = await fetch(`${API_GATEWAY_URL}/auth/verify`, {
-                    method: 'GET',
-                    headers: { 
-                        'Authorization': `Bearer ${token}` 
-                    }
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    verifyResult.innerHTML = `<b>¡Token Válido!</b><br>El API Gateway lo enrutó y Auth lo verificó.<br><br><b>Respuesta:</b><br><pre>${JSON.stringify(data, null, 2)}</pre>`;
-                    verifyResult.style.color = "green";
-                } else {
-                    verifyResult.innerHTML = "<b>Error:</b> Token inválido o expirado.";
-                    verifyResult.style.color = "red";
-                }
-            } catch (error) {
-                verifyResult.innerHTML = "<b>Error de Red:</b> No se pudo contactar al API Gateway.";
-                verifyResult.style.color = "red";
-            }
-        });
-
-        // LÓGICA CERRAR SESIÓN
-        btnLogout.addEventListener('click', () => {
-            localStorage.clear();
-            loginForm.reset();
-            verifyResult.classList.add('hidden');
-            loginView.classList.remove('hidden');
-            dashboardView.classList.add('hidden');
-        });
-
-        // UTILIDAD: Mostrar panel de control
-        function showDashboard() {
-            loginView.classList.add('hidden');
-            dashboardView.classList.remove('hidden');
-            
-            const rol = localStorage.getItem("user_role");
-            const nivel = localStorage.getItem("user_level");
-            
-            userInfoBox.innerHTML = `
-                <strong>¡Autenticación Exitosa!</strong><br><br>
-                <b>Rol:</b> ${rol}<br>
-                <b>Nivel:</b> ${nivel}<br><br>
-                <i style="font-size: 11px;">JWT guardado en localStorage.</i>
-            `;
-        }
     </script>
+
+    <!-- Módulo Principal ES6 -->
+    <script type="module" src="./js/app.js"></script>
 </body>
 </html>

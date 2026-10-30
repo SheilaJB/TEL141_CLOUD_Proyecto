@@ -6,12 +6,14 @@ from app.dependencies import get_user_identity
 from app.repository import QueryRepository
 from app.schemas import (
     ClusterMetrics,
+    DeploymentSummary,
     FlavorResponse,
     ImageResponse,
     RequestSummary,
     ServerDetail,
     SliceSummary,
     SliceTopology,
+    TemplateResponse,
     UserAdminView,
     UserIdentity,
     UserQuotaSummary,
@@ -27,7 +29,7 @@ async def get_repo() -> QueryRepository:
 
 
 # -----------------------------------------------------------------------------
-# Catálogo común (Flavors, Imágenes, Zonas)
+# Catálogo común (Flavors, Imágenes, Zonas, Plantillas)
 # -----------------------------------------------------------------------------
 
 @router.get("/flavors", response_model=List[FlavorResponse])
@@ -58,6 +60,15 @@ async def list_zones(
         service_level=identity.service_level,
         is_admin=is_admin,
     )
+
+
+@router.get("/templates", response_model=List[TemplateResponse])
+async def list_templates(
+    repo: QueryRepository = Depends(get_repo),
+    identity: UserIdentity = Depends(get_user_identity),
+):
+    user_filter = identity.user_id if identity.role == "consumidor" else None
+    return await repo.list_templates(user_id=user_filter)
 
 
 # -----------------------------------------------------------------------------
@@ -133,7 +144,7 @@ async def get_slice_topology(
 
 
 # -----------------------------------------------------------------------------
-# Consultas de Solicitudes de Despliegue y Aprobaciones
+# Consultas de Solicitudes de Aprobación y Despliegues
 # -----------------------------------------------------------------------------
 
 @router.get("/requests", response_model=List[RequestSummary])
@@ -144,6 +155,40 @@ async def list_requests(
 ):
     user_filter = identity.user_id if identity.role == "consumidor" else None
     return await repo.list_requests(user_id=user_filter, estado=estado)
+
+
+@router.get("/deployments", response_model=List[DeploymentSummary])
+async def list_deployments(
+    slice_id: Optional[int] = Query(None, description="Filtrar por slice ID"),
+    estado: Optional[str] = Query(None, description="Filtrar por estado del despliegue"),
+    repo: QueryRepository = Depends(get_repo),
+    identity: UserIdentity = Depends(get_user_identity),
+):
+    user_filter = identity.user_id if identity.role == "consumidor" else None
+    return await repo.list_deployments(
+        user_id=user_filter,
+        slice_id=slice_id,
+        estado=estado,
+    )
+
+
+@router.get("/deployments/{deployment_id}", response_model=DeploymentSummary)
+async def get_deployment(
+    deployment_id: int,
+    repo: QueryRepository = Depends(get_repo),
+    identity: UserIdentity = Depends(get_user_identity),
+):
+    user_filter = identity.user_id if identity.role == "consumidor" else None
+    item = await repo.get_deployment_detail(
+        deployment_id=deployment_id,
+        user_id=user_filter,
+    )
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Despliegue con ID {deployment_id} no encontrado o no accesible.",
+        )
+    return item
 
 
 # -----------------------------------------------------------------------------

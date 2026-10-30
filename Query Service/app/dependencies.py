@@ -1,3 +1,4 @@
+import secrets
 from typing import Optional
 from fastapi import Header, HTTPException, status
 from app.config import settings
@@ -10,11 +11,14 @@ async def get_user_identity(
     x_user_nivel: Optional[str] = Header(None, alias="X-User-Nivel"),
     x_internal_token: Optional[str] = Header(None, alias="X-Internal-Token"),
 ) -> UserIdentity:
-    if settings.internal_service_token and x_internal_token != settings.internal_service_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Peticion no autorizada: token interno invalido o ausente.",
-        )
+    if settings.internal_service_token:
+        if not x_internal_token or not secrets.compare_digest(
+            x_internal_token.strip(), settings.internal_service_token.strip()
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Peticion no autorizada: token interno invalido o ausente.",
+            )
 
     if not x_user_id or not x_user_role:
         raise HTTPException(
@@ -23,7 +27,7 @@ async def get_user_identity(
         )
 
     try:
-        user_id = int(x_user_id)
+        user_id = int(x_user_id.strip())
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

@@ -24,6 +24,7 @@ class ImageResponse(BaseModel):
     nombre: str
     cluster_compatible: Optional[int] = None
     ruta_referencia: str
+    diskmb_size: Optional[int] = None
     contador_refs: int
     estado: str
 
@@ -61,6 +62,9 @@ class SliceSummary(BaseModel):
     estado: str
     zona_id: Optional[int] = None
     zona_nombre: Optional[str] = None
+    cluster_id: Optional[int] = None
+    cluster_nombre: Optional[str] = None
+    vlan_stag: Optional[int] = None
     vlan_s: Optional[int] = None
     version_activa_id: Optional[int] = None
     version_activa_numero: Optional[int] = None
@@ -80,27 +84,36 @@ class SliceNodeDetail(BaseModel):
     imagen_id: int
     imagen_nombre: Optional[str] = None
     estado_nodo: str
+    public_access: bool = False
     pid: Optional[int] = None
+    vnc_display: Optional[int] = None
     puerto_vnc: Optional[int] = None
     servidor_id: Optional[int] = None
     servidor_ip: Optional[str] = None
+    deployment_id: Optional[int] = None
 
 
 class SlicePortDetail(BaseModel):
     id: str
-    name: Optional[str] = None
+    enlace_id: str
     nodo_id: str
     nodo_name: Optional[str] = None
-    public: bool
+    public: bool = False
+    nic_index: Optional[int] = None
     mac: Optional[str] = None
     ip: Optional[str] = None
-    vlan_tag: Optional[int] = None
-    ns: Optional[str] = None
+    estado: str
+    deployment_id: Optional[int] = None
 
 
 class SliceLinkDetail(BaseModel):
     id: str
     name: str
+    public: bool = False
+    cidr: Optional[str] = None
+    vlan_ctag: Optional[int] = None
+    estado: str
+    deployment_id: Optional[int] = None
     puertos: List[SlicePortDetail] = []
 
 
@@ -109,6 +122,10 @@ class SliceTopology(BaseModel):
     nombre: str
     estado: str
     zona_id: Optional[int] = None
+    zona_nombre: Optional[str] = None
+    cluster_id: Optional[int] = None
+    cluster_nombre: Optional[str] = None
+    vlan_stag: Optional[int] = None
     vlan_s: Optional[int] = None
     version_id: Optional[int] = None
     numero_version: Optional[int] = None
@@ -129,6 +146,30 @@ class RequestSummary(BaseModel):
     fecha_sol: datetime
     motivo: Optional[str] = None
     tipo_deployment: str
+
+
+class DeploymentSummary(BaseModel):
+    id: int
+    slice_id: int
+    slice_nombre: Optional[str] = None
+    origin_version_id: Optional[int] = None
+    target_version_id: Optional[int] = None
+    tipo: str
+    estado: str
+    workflow_id: Optional[str] = None
+    plan: Optional[Dict[str, Any]] = None
+    error: Optional[Dict[str, Any]] = None
+    solicitado_por: int
+    solicitado_por_codigo: Optional[str] = None
+    created_at: datetime
+    finished_at: Optional[datetime] = None
+
+
+class TemplateResponse(BaseModel):
+    id: int
+    dueño_id: Optional[int] = None
+    nombre: str
+    spec: Dict[str, Any]
 
 
 class ServerDetail(BaseModel):

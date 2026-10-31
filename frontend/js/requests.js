@@ -66,6 +66,7 @@ export const Requests = {
         }
 
         const currentUser = Storage.getUser();
+        const isOperator = currentUser?.rol === "operador";
         const isStaff = currentUser?.rol === "operador" || currentUser?.rol === "admin";
 
         const rows = requestsList.map(r => {
@@ -87,9 +88,9 @@ export const Requests = {
                     </td>
                     <td class="p-3 text-right space-x-1 whitespace-nowrap">
                         <button data-id="${r.id}" class="btn-req-review bg-blue-900 text-white hover:bg-blue-950 px-2.5 py-1 rounded font-semibold text-xs" title="Ver contenido, VMs, enlaces y topología">
-                            ${isStaff ? 'REVISAR SOLICITUD' : 'VER DETALLES'}
+                            ${isOperator ? 'REVISAR SOLICITUD' : 'VER DETALLES'}
                         </button>
-                        ${isStaff && isPending ? `
+                        ${isOperator && isPending ? `
                             <button data-id="${r.id}" data-deploymentid="${r.deployment_id}" class="btn-req-approve bg-emerald-700 text-white hover:bg-emerald-800 px-2.5 py-1 rounded font-semibold text-xs" title="Aprobar despliegue">
                                 APROBAR
                             </button>
@@ -353,12 +354,12 @@ export const Requests = {
                 secEval.classList.add("hidden");
             }
 
-            // Panel de decisión del Operador (solo visible para Operador/Admin en estado PENDING)
+            // Panel de decisión del Operador (exclusivo para rol Operador en estado PENDING)
             const currentUser = Storage.getUser();
-            const isStaff = currentUser?.rol === "operador" || currentUser?.rol === "admin";
+            const isOperator = currentUser?.rol === "operador";
             const opPanel = document.getElementById("review-operator-decision-panel");
 
-            if (isStaff && req.estado === "PENDING") {
+            if (isOperator && req.estado === "PENDING") {
                 opPanel.classList.remove("hidden");
                 const reasonInput = document.getElementById("review-decision-reason");
                 if (reasonInput) reasonInput.value = "";

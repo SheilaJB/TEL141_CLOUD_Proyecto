@@ -156,5 +156,45 @@ export const API = {
         destroy: async (sliceId) => request(`/slices/${sliceId}/destroy`, {
             method: "POST"
         })
+    },
+
+    // ------------------------------------------------------------------------
+    // Operaciones Administrativas de Infraestructura e Identidad (Rol Admin)
+    // ------------------------------------------------------------------------
+    admin: {
+        getQuotas: async () => request("/cruds/admin/quotas"),
+        updateQuota: async (nivel_id, recurso, prometido) => request("/cruds/admin/quotas", {
+            method: "PUT",
+            body: JSON.stringify({ nivel_id, recurso, prometido })
+        }),
+        interveneSlice: async (sliceId, accion, motivo) => request(`/cruds/admin/slices/${sliceId}/intervene`, {
+            method: "POST",
+            body: JSON.stringify({ accion, motivo })
+        }),
+        toggleZone: async (zoneId) => request(`/cruds/admin/zones/${zoneId}/toggle`, {
+            method: "PATCH"
+        }),
+        toggleFlavor: async (flavorId) => request(`/cruds/admin/flavors/${flavorId}/toggle`, {
+            method: "PATCH"
+        }),
+        getUsers: async () => request("/auth/users"),
+        createUser: async (user) => request("/auth/usuarios", {
+            method: "POST",
+            body: JSON.stringify(user)
+        }),
+        updateUser: async (userId, data) => request(`/auth/usuarios/${userId}`, {
+            method: "PATCH",
+            body: JSON.stringify(data)
+        }),
+        getAllSlices: async () => request("/cruds/slices"),
+        getAuditLogs: async (params = {}) => {
+            const qs = new URLSearchParams(params).toString();
+            return request(`/cruds/admin/audit-logs${qs ? '?' + qs : ''}`);
+        },
+        getSecurityAnomalies: async () => request("/cruds/admin/security/anomalies"),
+        purgeSliceSecurity: async (sliceId, motivo) => request("/cruds/admin/security/purge", {
+            method: "POST",
+            body: JSON.stringify({ slice_id: parseInt(sliceId, 10), motivo })
+        })
     }
 };

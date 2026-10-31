@@ -186,6 +186,7 @@
             <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <!-- Barra de Pestañas -->
                 <div class="border-b border-slate-200 bg-slate-50/50 px-4 pt-3 flex space-x-2" id="tabs-bar">
+                    <!-- Pestañas para CONSUMIDOR y OPERADOR -->
                     <button type="button" data-tab="drafts" id="tab-btn-drafts" class="tab-btn pb-3 px-4 text-xs font-bold uppercase tracking-wider text-blue-900 border-b-2 border-blue-900">
                         1. Mis Borradores
                     </button>
@@ -197,6 +198,23 @@
                     </button>
                     <button type="button" data-tab="infra" id="tab-btn-infra" class="tab-btn pb-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700 border-b-2 border-transparent">
                         4. Catálogo de Recursos
+                    </button>
+
+                    <!-- Pestañas exclusivas para ADMINISTRADOR DE INFRAESTRUCTURA -->
+                    <button type="button" data-tab="admin-dashboard" id="tab-btn-admin-dashboard" class="tab-btn hidden pb-3 px-4 text-xs font-bold uppercase tracking-wider text-blue-900 border-b-2 border-blue-900">
+                        1. DASHBOARD & MONITOREO
+                    </button>
+                    <button type="button" data-tab="admin-infra" id="tab-btn-admin-infra" class="tab-btn hidden pb-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700 border-b-2 border-transparent">
+                        2. INFRAESTRUCTURA Y CATÁLOGOS
+                    </button>
+                    <button type="button" data-tab="admin-users" id="tab-btn-admin-users" class="tab-btn hidden pb-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700 border-b-2 border-transparent">
+                        3. GESTIÓN DE IDENTIDAD Y USUARIOS
+                    </button>
+                    <button type="button" data-tab="admin-quotas" id="tab-btn-admin-quotas" class="tab-btn hidden pb-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700 border-b-2 border-transparent">
+                        4. POLÍTICAS Y CUOTAS
+                    </button>
+                    <button type="button" data-tab="admin-audit" id="tab-btn-admin-audit" class="tab-btn hidden pb-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700 border-b-2 border-transparent">
+                        5. AUDITORÍA Y SEGURIDAD
                     </button>
                 </div>
 
@@ -254,6 +272,41 @@
                         </div>
                         <div id="infra-container">
                             <!-- Inyectado por app.js -->
+                        </div>
+                    </div>
+
+                    <!-- PANE ADMIN 1: DASHBOARD & MONITOREO (Vista de inicio Admin) -->
+                    <div id="tab-pane-admin-dashboard" class="hidden space-y-6">
+                        <div id="admin-dashboard-container">
+                            <!-- Inyectado por admin.js -->
+                        </div>
+                    </div>
+
+                    <!-- PANE ADMIN 2: INFRAESTRUCTURA Y CATÁLOGOS -->
+                    <div id="tab-pane-admin-infra" class="hidden space-y-6">
+                        <div id="admin-infra-container">
+                            <!-- Inyectado por admin.js -->
+                        </div>
+                    </div>
+
+                    <!-- PANE ADMIN 3: GESTIÓN DE IDENTIDAD Y USUARIOS -->
+                    <div id="tab-pane-admin-users" class="hidden space-y-6">
+                        <div id="admin-users-container">
+                            <!-- Inyectado por admin.js -->
+                        </div>
+                    </div>
+
+                    <!-- PANE ADMIN 4: POLÍTICAS Y CUOTAS -->
+                    <div id="tab-pane-admin-quotas" class="hidden space-y-6">
+                        <div id="admin-quotas-container">
+                            <!-- Inyectado por admin.js -->
+                        </div>
+                    </div>
+
+                    <!-- PANE ADMIN 5: AUDITORÍA Y SEGURIDAD -->
+                    <div id="tab-pane-admin-audit" class="hidden space-y-6">
+                        <div id="admin-audit-container">
+                            <!-- Inyectado por admin.js -->
                         </div>
                     </div>
                 </div>
@@ -509,9 +562,257 @@
 
             <!-- Pie del Modal -->
             <div class="p-4 border-t border-slate-200 bg-slate-50 flex justify-end">
-                <button type="button" id="review-modal-close-bottom-btn" class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold px-4 py-2 rounded-lg text-xs uppercase tracking-wider transition">
+                <button type="button" onclick="document.getElementById('modal-request-review').classList.add('hidden')" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-4 py-2 rounded-lg text-xs uppercase tracking-wider transition">
                     CERRAR
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- 6. MODALES EXCLUSIVOS DEL ADMINISTRADOR                           -->
+    <!-- ================================================================= -->
+
+    <!-- Modal 6.1: Intervención Administrativa Justificada de Slices -->
+    <div id="modal-admin-intervene" class="hidden fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden">
+            <div class="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                <div>
+                    <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider">Intervención Administrativa Justificada</h3>
+                    <span class="text-xs text-slate-500">Acción correctiva por fallos, incidentes o abandono</span>
+                </div>
+                <button type="button" onclick="document.getElementById('modal-admin-intervene').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 font-bold text-xl px-2">
+                    &times;
+                </button>
+            </div>
+            <div class="p-5 space-y-4 text-xs">
+                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
+                    <div><b>Slice:</b> <span id="intervene-slice-id" class="font-mono text-blue-900 font-bold"></span> — <span id="intervene-slice-name" class="font-bold text-slate-800"></span></div>
+                    <div class="text-[11px] text-slate-500">La intervención modificará inmediatamente el estado operativo de los recursos en la infraestructura.</div>
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-700 uppercase mb-1">Acción Administrativa</label>
+                    <select id="intervene-action" class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-900">
+                        <option value="STOP">DETENER SLICE (STOP) — Suspender VMs en hipervisor</option>
+                        <option value="DELETE">ELIMINAR SLICE (DELETE) — Liberar recursos y reservas</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-700 uppercase mb-1">
+                        Motivo Administrativo Justificado <span class="text-red-600">*</span>
+                    </label>
+                    <textarea 
+                        id="intervene-reason" 
+                        rows="3" 
+                        required
+                        placeholder="Ej. Recurso abandonado con vCPUs retenidas / Fallo en sincronización de hipervisor #2..."
+                        class="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-900"
+                    ></textarea>
+                    <p class="text-[10px] text-slate-400 mt-1">Norma de gobernanza: Toda intervención debe sustentarse y queda registrada de forma auditable.</p>
+                </div>
+
+                <div class="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+                    <button type="button" onclick="document.getElementById('modal-admin-intervene').classList.add('hidden')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-semibold uppercase text-xs">
+                        CANCELAR
+                    </button>
+                    <button type="button" id="btn-confirm-intervene" class="bg-amber-700 hover:bg-amber-800 text-white font-bold px-4 py-2 rounded-lg uppercase text-xs shadow-sm transition">
+                        CONFIRMAR INTERVENCIÓN
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 6.2: Registrar Nuevo Usuario -->
+    <div id="modal-admin-create-user" class="hidden fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
+            <div class="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                <div>
+                    <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider">Registrar Nueva Cuenta de Usuario</h3>
+                    <span class="text-xs text-slate-500">Gestión de identidad y asignación de credenciales</span>
+                </div>
+                <button type="button" onclick="document.getElementById('modal-admin-create-user').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 font-bold text-xl px-2">
+                    &times;
+                </button>
+            </div>
+            <form id="form-admin-create-user" class="p-5 space-y-4 text-xs">
+                <div>
+                    <label class="block font-bold text-slate-700 uppercase mb-1">Código de Usuario</label>
+                    <input type="text" id="create-user-codigo" placeholder="Ej. 20260003 u operador2" required class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 font-mono">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-700 uppercase mb-1">Contraseña Inicial</label>
+                    <input type="password" id="create-user-password" placeholder="••••••••" required class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-700 uppercase mb-1">Rol en la Plataforma</label>
+                    <select id="create-user-rol" class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 font-semibold">
+                        <option value="consumidor">Consumidor (Crea y despliega slices)</option>
+                        <option value="operador">Operador (Evalúa solicitudes de usuarios)</option>
+                        <option value="admin">Administrador (Gestión global de plataforma)</option>
+                    </select>
+                </div>
+                <div id="create-user-nivel-container">
+                    <label class="block font-bold text-slate-700 uppercase mb-1">Nivel de Servicio (Solo Consumidor)</label>
+                    <select id="create-user-nivel" class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 font-semibold">
+                        <option value="basico">Nivel Básico (Con aprobación manual de operador)</option>
+                        <option value="avanzado">Nivel Avanzado (Aprovisionamiento automático directo)</option>
+                    </select>
+                </div>
+                <div class="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+                    <button type="button" onclick="document.getElementById('modal-admin-create-user').classList.add('hidden')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-semibold uppercase text-xs">
+                        CANCELAR
+                    </button>
+                    <button type="submit" class="bg-blue-900 hover:bg-blue-950 text-white font-bold px-4 py-2 rounded-lg uppercase text-xs shadow-sm transition">
+                        CREAR USUARIO
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 6.3: Modificar Usuario Existente -->
+    <div id="modal-admin-edit-user" class="hidden fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
+            <div class="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                <div>
+                    <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider">Modificar Cuenta de Usuario</h3>
+                    <span class="text-xs text-slate-500">Actualizar rol, nivel, estado o credenciales</span>
+                </div>
+                <button type="button" onclick="document.getElementById('modal-admin-edit-user').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 font-bold text-xl px-2">
+                    &times;
+                </button>
+            </div>
+            <form id="form-admin-edit-user" class="p-5 space-y-4 text-xs">
+                <input type="hidden" id="edit-user-id">
+                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <span class="text-[10px] text-slate-500 font-bold uppercase">Código de Usuario</span>
+                    <div id="edit-user-codigo-display" class="font-mono font-bold text-blue-950 text-sm"></div>
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-700 uppercase mb-1">Rol</label>
+                    <select id="edit-user-rol" class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 font-semibold">
+                        <option value="consumidor">Consumidor</option>
+                        <option value="operador">Operador</option>
+                        <option value="admin">Administrador</option>
+                    </select>
+                </div>
+                <div id="edit-user-nivel-container">
+                    <label class="block font-bold text-slate-700 uppercase mb-1">Nivel de Servicio</label>
+                    <select id="edit-user-nivel" class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 font-semibold">
+                        <option value="basico">Nivel Básico</option>
+                        <option value="avanzado">Nivel Avanzado</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-700 uppercase mb-1">Estado de la Cuenta</label>
+                    <select id="edit-user-estado" class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 font-semibold">
+                        <option value="ACTIVE">ACTIVE — Cuenta activa y autorizada</option>
+                        <option value="BLOCKED">BLOCKED — Cuenta bloqueada temporalmente</option>
+                        <option value="INACTIVE">INACTIVE — Cuenta dada de baja</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-700 uppercase mb-1">Nueva Contraseña (Opcional)</label>
+                    <input type="password" id="edit-user-password" placeholder="Dejar en blanco para mantener actual" class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900">
+                </div>
+                <div class="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+                    <button type="button" onclick="document.getElementById('modal-admin-edit-user').classList.add('hidden')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-semibold uppercase text-xs">
+                        CANCELAR
+                    </button>
+                    <button type="submit" class="bg-blue-900 hover:bg-blue-950 text-white font-bold px-4 py-2 rounded-lg uppercase text-xs shadow-sm transition">
+                        GUARDAR CAMBIOS
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 6.4: Modificar Políticas de Cuotas -->
+    <div id="modal-admin-edit-quota" class="hidden fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
+            <div class="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                <div>
+                    <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider" id="quota-modal-nivel-title">Actualizar Cuotas</h3>
+                    <span class="text-xs text-slate-500">Límites máximos prometidos en la base de datos</span>
+                </div>
+                <button type="button" onclick="document.getElementById('modal-admin-edit-quota').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 font-bold text-xl px-2">
+                    &times;
+                </button>
+            </div>
+            <form id="form-admin-edit-quota" class="p-5 space-y-4 text-xs">
+                <input type="hidden" id="quota-modal-nivel-id">
+                <div>
+                    <label class="block font-bold text-slate-700 uppercase mb-1">vCPUs Máximos</label>
+                    <input type="number" id="quota-input-vcpu" min="1" max="128" required class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 font-mono">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-700 uppercase mb-1">Memoria RAM Máxima (MB)</label>
+                    <input type="number" id="quota-input-ram" min="256" step="256" required class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 font-mono">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-700 uppercase mb-1">Almacenamiento Máximo (MB)</label>
+                    <input type="number" id="quota-input-disk" min="1000" step="1000" required class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 font-mono">
+                </div>
+                <div class="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+                    <button type="button" onclick="document.getElementById('modal-admin-edit-quota').classList.add('hidden')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-semibold uppercase text-xs">
+                        CANCELAR
+                    </button>
+                    <button type="submit" class="bg-blue-900 hover:bg-blue-950 text-white font-bold px-4 py-2 rounded-lg uppercase text-xs shadow-sm transition">
+                        GUARDAR POLÍTICAS
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 6.5: Purga de Seguridad por Consumo Indebido o Incidente -->
+    <div id="modal-admin-security-purge" class="hidden fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-red-200 overflow-hidden">
+            <div class="p-4 border-b border-red-200 bg-red-50 flex items-center justify-between">
+                <div>
+                    <h3 class="text-sm font-bold text-red-900 uppercase tracking-wider flex items-center">
+                        <span class="w-2.5 h-2.5 rounded-full bg-red-600 mr-2 animate-pulse"></span>
+                        Purga de Seguridad Inmediata
+                    </h3>
+                    <span class="text-xs text-red-600">Eliminación forzosa y revocación de recursos por infracción de políticas</span>
+                </div>
+                <button type="button" onclick="document.getElementById('modal-admin-security-purge').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 font-bold text-xl px-2">
+                    &times;
+                </button>
+            </div>
+            <div class="p-5 space-y-4 text-xs">
+                <input type="hidden" id="purge-slice-id-input">
+                <div class="bg-red-50/70 p-3.5 rounded-xl border border-red-200 text-red-900 space-y-1">
+                    <div class="font-bold">Slice a Purgar: <span id="purge-slice-display" class="font-mono text-slate-900"></span></div>
+                    <div class="text-[11px] text-red-700">
+                        Atención: Esta acción destruirá inmediatamente todas las VMs asociadas, revocará interfaces virtuales, liberará cuotas y registrará un evento de severidad CRÍTICA en la auditoría del clúster.
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-700 uppercase mb-1">
+                        Sustento / Motivo del Incidente de Seguridad <span class="text-red-600">*</span>
+                    </label>
+                    <textarea 
+                        id="purge-incident-reason" 
+                        rows="3" 
+                        required
+                        placeholder="Ej. Consumo indebido detectado: el slice excede vCPUs asignados / actividad no autorizada en red..."
+                        class="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-600"
+                    ></textarea>
+                </div>
+
+                <div class="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+                    <button type="button" onclick="document.getElementById('modal-admin-security-purge').classList.add('hidden')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-semibold uppercase text-xs">
+                        CANCELAR
+                    </button>
+                    <button type="button" id="btn-confirm-security-purge" class="bg-red-700 hover:bg-red-800 text-white font-bold px-4 py-2 rounded-lg uppercase text-xs shadow-sm transition">
+                        PURGAR Y ELIMINAR RECURSOS
+                    </button>
+                </div>
             </div>
         </div>
     </div>

@@ -9,6 +9,7 @@ import { Drafts } from "./drafts.js";
 import { Slices } from "./slices.js";
 import { Requests } from "./requests.js";
 import { Wizard } from "./wizard.js";
+import { AdminView } from "./admin.js";
 
 let activeTab = "drafts"; // "drafts" | "requests" | "slices"
 let autoPollingInterval = null;
@@ -145,10 +146,38 @@ function showDashboardView(user) {
     const btnSlices = document.getElementById("tab-btn-slices");
     const btnInfra = document.getElementById("tab-btn-infra");
 
-    if (isOperator) {
+    const btnAdminDash = document.getElementById("tab-btn-admin-dashboard");
+    const btnAdminInfra = document.getElementById("tab-btn-admin-infra");
+    const btnAdminUsers = document.getElementById("tab-btn-admin-users");
+    const btnAdminQuotas = document.getElementById("tab-btn-admin-quotas");
+    const btnAdminAudit = document.getElementById("tab-btn-admin-audit");
+
+    if (isAdmin) {
+        // ADMINISTRADOR DE INFRAESTRUCTURA:
+        // Ocultar pestañas de usuario y operador (no participa en aprobación rutinaria ni borradores)
+        if (btnDrafts) btnDrafts.classList.add("hidden");
+        if (btnRequests) btnRequests.classList.add("hidden");
+        if (btnSlices) btnSlices.classList.add("hidden");
+        if (btnInfra) btnInfra.classList.add("hidden");
+
+        // Mostrar pestañas del Administrador
+        if (btnAdminDash) btnAdminDash.classList.remove("hidden");
+        if (btnAdminInfra) btnAdminInfra.classList.remove("hidden");
+        if (btnAdminUsers) btnAdminUsers.classList.remove("hidden");
+        if (btnAdminQuotas) btnAdminQuotas.classList.remove("hidden");
+        if (btnAdminAudit) btnAdminAudit.classList.remove("hidden");
+
+        switchTab("admin-dashboard");
+    } else if (isOperator) {
         // OPERADOR: NO crea borradores, NO ve catálogo de recursos ni infraestructura
         if (btnDrafts) btnDrafts.classList.add("hidden");
         if (btnInfra) btnInfra.classList.add("hidden");
+        if (btnAdminDash) btnAdminDash.classList.add("hidden");
+        if (btnAdminInfra) btnAdminInfra.classList.add("hidden");
+        if (btnAdminUsers) btnAdminUsers.classList.add("hidden");
+        if (btnAdminQuotas) btnAdminQuotas.classList.add("hidden");
+        if (btnAdminAudit) btnAdminAudit.classList.add("hidden");
+
         if (btnRequests) {
             btnRequests.classList.remove("hidden");
             btnRequests.innerText = "1. BANDEJA DE SOLICITUDES";
@@ -158,24 +187,14 @@ function showDashboardView(user) {
             btnSlices.innerText = "2. SLICES DESPLEGADOS (ACTIVOS)";
         }
         switchTab("requests");
-    } else if (isAdmin) {
-        // ADMIN: Solicitudes globales, Slices activos e Infraestructura con métricas
-        if (btnDrafts) btnDrafts.classList.add("hidden");
-        if (btnRequests) {
-            btnRequests.classList.remove("hidden");
-            btnRequests.innerText = "1. SOLICITUDES GLOBALES";
-        }
-        if (btnSlices) {
-            btnSlices.classList.remove("hidden");
-            btnSlices.innerText = "2. SLICES ACTIVOS";
-        }
-        if (btnInfra) {
-            btnInfra.classList.remove("hidden");
-            btnInfra.innerText = "3. INFRAESTRUCTURA Y MÉTRICAS";
-        }
-        switchTab("requests");
     } else {
         // CONSUMIDOR: Borradores, Solicitudes, Slices Activos y Catálogo disponible
+        if (btnAdminDash) btnAdminDash.classList.add("hidden");
+        if (btnAdminInfra) btnAdminInfra.classList.add("hidden");
+        if (btnAdminUsers) btnAdminUsers.classList.add("hidden");
+        if (btnAdminQuotas) btnAdminQuotas.classList.add("hidden");
+        if (btnAdminAudit) btnAdminAudit.classList.add("hidden");
+
         if (btnDrafts) {
             btnDrafts.classList.remove("hidden");
             btnDrafts.innerText = "1. MIS BORRADORES";
@@ -209,11 +228,12 @@ function initTabs() {
 
 function switchTab(tab) {
     const user = Storage.getUser();
-    if (user?.rol === "operador" && (tab === "drafts" || tab === "infra")) {
-        tab = "requests";
-    }
-    if (user?.rol === "admin" && tab === "drafts") {
-        tab = "requests";
+    if (user?.rol === "admin") {
+        if (!tab.startsWith("admin-")) tab = "admin-dashboard";
+    } else if (user?.rol === "operador") {
+        if (tab !== "requests" && tab !== "slices") tab = "requests";
+    } else {
+        if (tab.startsWith("admin-")) tab = "drafts";
     }
 
     activeTab = tab;
@@ -225,16 +245,39 @@ function switchTab(tab) {
         btn.classList.toggle("border-transparent", !isActive);
     });
 
-    document.getElementById("tab-pane-drafts").classList.toggle("hidden", tab !== "drafts");
-    document.getElementById("tab-pane-requests").classList.toggle("hidden", tab !== "requests");
-    document.getElementById("tab-pane-slices").classList.toggle("hidden", tab !== "slices");
+    // Ocultar/mostrar paneles estándar
+    const paneDrafts = document.getElementById("tab-pane-drafts");
+    const paneRequests = document.getElementById("tab-pane-requests");
+    const paneSlices = document.getElementById("tab-pane-slices");
     const paneInfra = document.getElementById("tab-pane-infra");
+    if (paneDrafts) paneDrafts.classList.toggle("hidden", tab !== "drafts");
+    if (paneRequests) paneRequests.classList.toggle("hidden", tab !== "requests");
+    if (paneSlices) paneSlices.classList.toggle("hidden", tab !== "slices");
     if (paneInfra) paneInfra.classList.toggle("hidden", tab !== "infra");
+
+    // Ocultar/mostrar paneles exclusivos de Admin
+    const paneAdminDash = document.getElementById("tab-pane-admin-dashboard");
+    const paneAdminInfra = document.getElementById("tab-pane-admin-infra");
+    const paneAdminUsers = document.getElementById("tab-pane-admin-users");
+    const paneAdminQuotas = document.getElementById("tab-pane-admin-quotas");
+    const paneAdminAudit = document.getElementById("tab-pane-admin-audit");
+    if (paneAdminDash) paneAdminDash.classList.toggle("hidden", tab !== "admin-dashboard");
+    if (paneAdminInfra) paneAdminInfra.classList.toggle("hidden", tab !== "admin-infra");
+    if (paneAdminUsers) paneAdminUsers.classList.toggle("hidden", tab !== "admin-users");
+    if (paneAdminQuotas) paneAdminQuotas.classList.toggle("hidden", tab !== "admin-quotas");
+    if (paneAdminAudit) paneAdminAudit.classList.toggle("hidden", tab !== "admin-audit");
 
     if (tab === "drafts") Drafts.load("drafts-table-container");
     if (tab === "requests") Requests.load("requests-table-container");
     if (tab === "slices") Slices.load("slices-table-container");
     if (tab === "infra") loadInfraData("infra-container");
+
+    // Paneles de Administrador
+    if (tab === "admin-dashboard") AdminView.loadDashboard("admin-dashboard-container");
+    if (tab === "admin-infra") AdminView.loadCatalogs("admin-infra-container");
+    if (tab === "admin-users") AdminView.loadUsers("admin-users-container");
+    if (tab === "admin-quotas") AdminView.loadQuotas("admin-quotas-container");
+    if (tab === "admin-audit") AdminView.loadAudit("admin-audit-container");
 }
 
 function initGlobalButtons() {
@@ -281,6 +324,14 @@ function initGlobalButtons() {
 
 async function refreshAllData() {
     const user = Storage.getUser();
+    if (user?.rol === "admin") {
+        if (activeTab === "admin-dashboard") await AdminView.loadDashboard("admin-dashboard-container");
+        else if (activeTab === "admin-infra") await AdminView.loadCatalogs("admin-infra-container");
+        else if (activeTab === "admin-users") await AdminView.loadUsers("admin-users-container");
+        else if (activeTab === "admin-quotas") await AdminView.loadQuotas("admin-quotas-container");
+        return;
+    }
+
     if (user?.rol === "consumidor") {
         await Quotas.load("quotas-container");
     } else if (user?.rol === "operador") {
@@ -346,82 +397,11 @@ async function loadInfraData(containerId) {
     `;
 
     try {
-        const [zones, flavors, images, servers, metrics] = await Promise.all([
+        const [zones, flavors, images] = await Promise.all([
             API.query.getZones().catch(() => []),
-            API.query.getFlavors(false).catch(() => []),
-            API.query.getImages(false).catch(() => []),
-            API.query.getServers().catch(() => []),
-            API.query.getMetrics().catch(() => null)
+            API.query.getFlavors(true).catch(() => []),
+            API.query.getImages(true).catch(() => [])
         ]);
-
-        let metricsHtml = "";
-        if (metrics) {
-            metricsHtml = `
-                <div class="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-5 rounded-2xl shadow-sm mb-6">
-                    <h4 class="text-xs font-bold uppercase tracking-wider text-blue-200 mb-3">Métricas Globales del Clúster (Vista Administrador)</h4>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                        <div class="bg-white/10 p-3 rounded-xl">
-                            <span class="block text-2xl font-bold">${metrics.total_slices || 0}</span>
-                            <span class="text-xs text-blue-200">Slices Totales</span>
-                        </div>
-                        <div class="bg-white/10 p-3 rounded-xl">
-                            <span class="block text-2xl font-bold">${metrics.running_slices || 0}</span>
-                            <span class="text-xs text-blue-200">Slices Activos</span>
-                        </div>
-                        <div class="bg-white/10 p-3 rounded-xl">
-                            <span class="block text-2xl font-bold">${metrics.active_servers || 0}</span>
-                            <span class="text-xs text-blue-200">Hipervisores Activos</span>
-                        </div>
-                        <div class="bg-white/10 p-3 rounded-xl">
-                            <span class="block text-2xl font-bold">${metrics.total_vcpu_allocated || 0}</span>
-                            <span class="text-xs text-blue-200">vCPUs Asignadas</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-
-        const currentUser = Storage.getUser();
-        let serversHtml = "";
-        if (currentUser?.rol === "admin" && servers && servers.length > 0) {
-            const serverCards = servers.map(s => `
-                <div class="p-4 bg-white rounded-xl border border-slate-200 shadow-sm space-y-2">
-                    <div class="flex items-center justify-between">
-                        <span class="font-bold text-slate-900 text-sm">Servidor #${s.id}</span>
-                        <span class="px-2 py-0.5 rounded-full text-xs font-bold ${s.estado === 'ACTIVE' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-slate-100 text-slate-700'}">
-                            ${s.estado}
-                        </span>
-                    </div>
-                    <div class="font-mono text-xs text-slate-600 bg-slate-50 p-2 rounded border border-slate-100 space-y-1">
-                        <div><b>IP Servidor:</b> ${s.ip_serv}</div>
-                        <div><b>MAC:</b> ${s.mac_serv || 'N/A'}</div>
-                    </div>
-                    <div class="grid grid-cols-3 gap-2 text-center text-xs pt-2">
-                        <div class="bg-slate-50 p-2 rounded">
-                            <span class="block font-bold text-slate-800">${s.total_cpu_cores}</span>
-                            <span class="text-[10px] text-slate-500 uppercase">Cores CPU</span>
-                        </div>
-                        <div class="bg-slate-50 p-2 rounded">
-                            <span class="block font-bold text-slate-800">${(s.total_ram_mb / 1024).toFixed(1)} GB</span>
-                            <span class="text-[10px] text-slate-500 uppercase">RAM Total</span>
-                        </div>
-                        <div class="bg-slate-50 p-2 rounded">
-                            <span class="block font-bold text-slate-800">${(s.total_disk_mb / 1024).toFixed(1)} GB</span>
-                            <span class="text-[10px] text-slate-500 uppercase">Disco</span>
-                        </div>
-                    </div>
-                </div>
-            `).join("");
-
-            serversHtml = `
-                <div>
-                    <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Hipervisores Físicos Disponibles</h4>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        ${serverCards}
-                    </div>
-                </div>
-            `;
-        }
 
         const flavorRows = (flavors || []).map(f => `
             <tr class="border-b border-slate-100 text-xs">
@@ -430,8 +410,8 @@ async function loadInfraData(containerId) {
                 <td class="p-2.5 text-slate-600">${f.vram_mb} MB</td>
                 <td class="p-2.5 text-slate-600">${f.vdisk_mb} MB</td>
                 <td class="p-2.5">
-                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${f.active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}">
-                        ${f.active ? 'ACTIVO' : 'INACTIVO'}
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${f.activo ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}">
+                        ${f.activo ? 'ACTIVO' : 'INACTIVO'}
                     </span>
                 </td>
             </tr>
@@ -442,7 +422,7 @@ async function loadInfraData(containerId) {
                 <td class="p-2.5 font-bold text-slate-800">${img.nombre}</td>
                 <td class="p-2.5 font-mono text-slate-600">${img.formato || 'QCOW2/RAW'}</td>
                 <td class="p-2.5">
-                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${img.active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}">
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${img.estado === 'ACTIVE' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}">
                         ${img.estado === 'ACTIVE' ? 'ACTIVO' : 'INACTIVO'}
                     </span>
                 </td>
@@ -462,10 +442,7 @@ async function loadInfraData(containerId) {
         `).join("");
 
         container.innerHTML = `
-            ${metricsHtml}
-            ${serversHtml}
-
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <!-- Sabores (Flavors) -->
                 <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                     <div class="p-3 bg-slate-50 border-b border-slate-200">

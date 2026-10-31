@@ -92,6 +92,16 @@ async def login(
 
     if not user or not is_valid:
         record_failure(rate_limit_key)
+        try:
+            await conn.execute(
+                """
+                INSERT INTO auth.auditoria_eventos (codigo_usuario, tipo_evento, severidad, entidad, descripcion, ip_origen)
+                VALUES ($1, 'LOGIN_FAILED', 'WARNING', 'USUARIO', 'Intento de inicio de sesión fallido: credenciales incorrectas', $2)
+                """,
+                req.codigo, client_ip
+            )
+        except Exception:
+            pass
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Código de usuario o contraseña incorrectos."
@@ -99,12 +109,34 @@ async def login(
 
     if user["estado"] != "ACTIVE":
         record_failure(rate_limit_key)
+        try:
+            await conn.execute(
+                """
+                INSERT INTO auth.auditoria_eventos (usuario_id, codigo_usuario, tipo_evento, severidad, entidad, entidad_id, descripcion, ip_origen)
+                VALUES ($1, $2, 'LOGIN_BLOCKED', 'CRITICAL', 'USUARIO', $3, $4, $5)
+                """,
+                user["id"], user["codigo"], str(user["id"]), f"Intento de acceso rechazado: cuenta en estado {user['estado']}", client_ip
+            )
+        except Exception:
+            pass
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Usuario inactivo o bloqueado."
         )
 
     clear_failures(rate_limit_key)
+
+    # Registro de auditoría de inicio de sesión exitoso
+    try:
+        await conn.execute(
+            """
+            INSERT INTO auth.auditoria_eventos (usuario_id, codigo_usuario, tipo_evento, severidad, entidad, entidad_id, descripcion, ip_origen)
+            VALUES ($1, $2, 'USER_LOGIN', 'INFO', 'USUARIO', $3, $4, $5)
+            """,
+            user["id"], user["codigo"], str(user["id"]), f"Inicio de sesión exitoso ({user['rol'].upper()}) desde {client_ip}", client_ip
+        )
+    except Exception:
+        pass
 
     # 1. Generar Access Token RS256
     access_token = create_access_token(
@@ -351,6 +383,17 @@ async def create_user(
     """
     new_user = await conn.fetchrow(insert_sql, user_data.codigo, hashed_pw, rol_row["id"], nivel_id, admin.id)
 
+    try:
+        await conn.execute(
+            """
+            INSERT INTO auth.auditoria_eventos (usuario_id, codigo_usuario, tipo_evento, severidad, entidad, entidad_id, descripcion, ip_origen)
+            VALUES ($1, $2, 'USER_CREATED', 'INFO', 'USUARIO', $3, $4, '127.0.0.1')
+            """,
+            admin.id, admin.codigo, str(new_user["id"]), f"Registro de nueva cuenta [{user_data.codigo}] con rol [{user_data.rol.upper()}] por [{admin.codigo}]"
+        )
+    except Exception:
+        pass
+
     return UserInfo(
         id=new_user["id"],
         codigo=new_user["codigo"],
@@ -438,6 +481,17 @@ async def update_user(
         """,
         user_id
     )
+
+    try:
+        await conn.execute(
+            """
+            INSERT INTO auth.auditoria_eventos (usuario_id, codigo_usuario, tipo_evento, severidad, entidad, entidad_id, descripcion, ip_origen)
+            VALUES ($1, $2, 'USER_MODIFIED', 'INFO', 'USUARIO', $3, $4, '127.0.0.1')
+            """,
+            admin.id, admin.codigo, str(user_id), f"Cuenta [{updated['codigo']}] modificada (Rol: {updated['rol']}, Estado: {updated['estado']}) por [{admin.codigo}]"
+        )
+    except Exception:
+        pass
 
     return UserInfo(
         id=updated["id"],

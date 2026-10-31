@@ -61,6 +61,7 @@ services:
       POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD}
       POSTGRES_SEEDS: postgres
       BIND_ON_IP: 0.0.0.0
+      PROMETHEUS_ENDPOINT: 0.0.0.0:9090
       DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
     volumes:
       - ./Slice Manager/temporalio/dynamicconfig:/etc/temporal/config/dynamicconfig:ro
@@ -278,6 +279,37 @@ services:
       - "${EDGE_PORT:-8443}:8443"
     volumes:
       - ${EDGE_KEYS_DIR:-./AuthAuthz/keys}:/run/edge-keys:ro
+    networks: [backend, public]
+
+  # -----------------------------------------------------------------------------
+  # MÓDULO DE MONITOREO Y OBSERVABILIDAD (PROMETHEUS + GRAFANA)
+  # -----------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.50.0
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks: [backend, public]
+
+  grafana:
+    image: grafana/grafana:10.3.3
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_SECURITY_COOKIE_SECURE=false
+      - GF_SECURITY_COOKIE_SAMESITE=none
+    volumes:
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/dashboards/json:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3001:3000"
     networks: [backend, public]
 
 networks:

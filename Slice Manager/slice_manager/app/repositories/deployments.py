@@ -611,6 +611,95 @@ class DeploymentRepository:
             if updated_ids | {item["id"] for item in already_deleted} != set(released_node_ids):
                 raise ValueError("inventory release nodes do not match deployment slice")
 
+    async def commit_destroy(
+        self,
+        connection: asyncpg.Connection,
+        deployment_id: int,
+        *,
+        node_ids: list[UUID],
+        complete: bool,
+    ) -> None:
+        # Única escritura de DELETED en Destroy (P26): una transacción, idempotente.
+        row = await connection.fetchrow(
+            """
+            SELECT d.tipo, d.estado, d.slice_id
+            FROM slices.deployment d
+            JOIN slices.slice s ON s.id = d.slice_id
+            WHERE d.id = $1
+            FOR UPDATE OF d, s
+            """,
+            deployment_id,
+        )
+        if row is None:
+            raise LookupError(f"deployment {deployment_id} was not found")
+        if row["tipo"] != "DESTROY":
+            raise ValueError("destroy commit only applies to DESTROY deployments")
+        if row["estado"] != "IN_PROGRESS":
+            raise ValueError("destroy commit requires an in-progress deployment")
+        slice_id = row["slice_id"]
+        if node_ids:
+            owned = await connection.fetchval(
+                """
+                SELECT count(*) FROM slices.slice_nodo
+                WHERE slice_id = $1 AND id = ANY($2::uuid[])
+                """,
+                slice_id,
+                node_ids,
+            )
+            if owned != len(set(node_ids)):
+                raise ValueError("destroy commit nodes do not match deployment slice")
+
+        if complete:
+            await connection.execute(
+                """
+                UPDATE slices.slice_enlace_puerto AS p
+                SET estado = 'DELETED'
+                FROM slices.slice_enlace AS e
+                WHERE p.enlace_id = e.id AND e.slice_id = $1 AND p.estado <> 'DELETED'
+                """,
+                slice_id,
+            )
+            await connection.execute(
+                """
+                UPDATE slices.slice_nodo SET estado_nodo = 'DELETED'
+                WHERE slice_id = $1 AND estado_nodo <> 'DELETED'
+                """,
+                slice_id,
+            )
+        elif node_ids:
+            await connection.execute(
+                """
+                UPDATE slices.slice_enlace_puerto AS p
+                SET estado = 'DELETED'
+                FROM slices.slice_enlace AS e
+                WHERE p.enlace_id = e.id AND e.slice_id = $1
+                  AND p.nodo_id = ANY($2::uuid[]) AND p.estado <> 'DELETED'
+                """,
+                slice_id,
+                node_ids,
+            )
+            await connection.execute(
+                """
+                UPDATE slices.slice_nodo SET estado_nodo = 'DELETED'
+                WHERE slice_id = $1 AND id = ANY($2::uuid[]) AND estado_nodo <> 'DELETED'
+                """,
+                slice_id,
+                node_ids,
+            )
+        # Un enlace sin puertos activos queda DELETED; se evalúa sobre todo el slice.
+        await connection.execute(
+            """
+            UPDATE slices.slice_enlace AS e
+            SET estado = 'DELETED'
+            WHERE e.slice_id = $1 AND e.estado <> 'DELETED'
+              AND NOT EXISTS (
+                  SELECT 1 FROM slices.slice_enlace_puerto AS p
+                  WHERE p.enlace_id = e.id AND p.estado <> 'DELETED'
+              )
+            """,
+            slice_id,
+        )
+
     async def get_approval_state(
         self, connection: asyncpg.Connection, deployment_id: int
     ) -> asyncpg.Record | None:
@@ -779,20 +868,6 @@ class DeploymentRepository:
             )
             if not status.endswith(" 1"):
                 raise LookupError(f"port {result.target_id} was not found for action facts")
-            return True
-        elif result.op == ActionOp.DESTROY_SLICE_HOST:
-            if not result.succeeded:
-                return False
-            destroyed = [UUID(str(item)) for item in result.facts.get("destroyed_vms", [])]
-            if destroyed:
-                await connection.execute(
-                    """
-                    UPDATE slices.slice_nodo SET estado_nodo = 'DELETED'
-                    WHERE slice_id = $1 AND id = ANY($2::uuid[])
-                    """,
-                    slice_id,
-                    destroyed,
-                )
             return True
         return False
 
@@ -1148,31 +1223,7 @@ class DeploymentRepository:
         outcome: DeploymentOutcome,
     ) -> None:
         if outcome == DeploymentOutcome.COMPLETED:
-            # Marcar ELIMINATED sirve para liberar VLAN
-            await connection.execute(
-                """
-                UPDATE slices.slice_enlace_puerto AS p
-                SET estado = 'DELETED'
-                FROM slices.slice_enlace AS e
-                WHERE p.enlace_id = e.id AND e.slice_id = $1
-                  AND p.estado <> 'DELETED'
-                """,
-                slice_id,
-            )
-            await connection.execute(
-                """
-                UPDATE slices.slice_enlace SET estado = 'DELETED'
-                WHERE slice_id = $1 AND estado <> 'DELETED'
-                """,
-                slice_id,
-            )
-            await connection.execute(
-                """
-                UPDATE slices.slice_nodo SET estado_nodo = 'DELETED'
-                WHERE slice_id = $1 AND estado_nodo <> 'DELETED'
-                """,
-                slice_id,
-            )
+            # DELETED de elementos lo escribe commit_destroy (P26); ELIMINATED libera el S-TAG.
             await connection.execute(
                 """
                 UPDATE slices.slice_version SET estado_version = 'ARCHIVED'
@@ -1189,7 +1240,7 @@ class DeploymentRepository:
                 slice_id,
             )
         elif outcome == DeploymentOutcome.FAILED:
-            # Destruccion parcial: los nodos ya borrados quedaron DELETED 
+            # Destruccion parcial: commit_destroy ya dejó DELETED los nodos destruidos
             if version_id is not None:
                 await connection.execute(
                     """

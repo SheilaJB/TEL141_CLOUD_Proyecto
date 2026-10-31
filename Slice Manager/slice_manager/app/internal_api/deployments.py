@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from contracts.registry import (
     ApprovalState,
+    CommitDestroy,
     DeploymentContext,
     FinishDeployment,
     RoundFacts,
@@ -47,6 +48,15 @@ async def commit_inventory(
     service: Annotated[SliceService, Depends(get_slice_service)],
 ) -> None:
     await service.commit_inventory(deployment_id)
+
+
+@router.post("/deployments/{deployment_id}/destroy/commit", status_code=204)
+async def commit_destroy(
+    deployment_id: int,
+    body: CommitDestroy,
+    service: Annotated[SliceService, Depends(get_slice_service)],
+) -> None:
+    await service.commit_destroy(deployment_id, body)
 
 
 @router.get(

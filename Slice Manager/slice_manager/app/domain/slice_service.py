@@ -9,6 +9,7 @@ from contracts.registry import (
     ApprovalDecision,
     ApprovalState,
     ApprovalStatus,
+    CommitDestroy,
     DeploymentContext,
     DeploymentCreated,
     FinishDeployment,
@@ -496,6 +497,23 @@ class SliceService:
             async with connection.transaction():
                 try:
                     await self._repository.commit_inventory(connection, deployment_id)
+                except LookupError as exc:
+                    raise ResourceNotFoundError(str(exc)) from exc
+                except ValueError as exc:
+                    raise ConflictError(str(exc)) from exc
+
+    async def commit_destroy(
+        self, deployment_id: int, request: CommitDestroy
+    ) -> None:
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                try:
+                    await self._repository.commit_destroy(
+                        connection,
+                        deployment_id,
+                        node_ids=request.node_ids,
+                        complete=request.complete,
+                    )
                 except LookupError as exc:
                     raise ResourceNotFoundError(str(exc)) from exc
                 except ValueError as exc:

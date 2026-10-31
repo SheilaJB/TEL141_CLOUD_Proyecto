@@ -224,6 +224,12 @@ def _build_plan(
                 f"flavor {flavor.name!r} contains non-positive resource values",
                 path=f"vms[{vm.name}].flavor",
             )
+        if image.disk_size > flavor.disk_mb:
+            raise InvalidSpecError(
+                f"DISK_TOO_SMALL: la imagen {image.name} requiere {image.disk_size} MB "
+                f"y el flavor {flavor.name} tiene {flavor.disk_mb} MB",
+                path=f"vms[{vm.name}].flavor",
+            )
         if vm.public and not supports_public_access:
             raise InvalidSpecError(
                 "public access is not supported by this cluster",

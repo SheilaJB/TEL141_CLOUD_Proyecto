@@ -46,12 +46,3 @@ class PlacementResult(ContractModel):
                 for allocation in response.allocations
             },
         )
-
-
-class PlacementRollbackRequest(ContractModel):
-    deployment_id: int = Field(gt=0)
-
-
-class PlacementRollbackResponse(ContractModel):
-    deployment_id: int = Field(gt=0)
-    status: PlacementStatus = PlacementStatus.RELEASED

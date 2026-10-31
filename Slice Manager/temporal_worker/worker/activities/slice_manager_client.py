@@ -7,6 +7,7 @@ from contracts.errors import ErrorCode, ErrorResponse
 
 from contracts.registry import (
     ApprovalState,
+    CommitDestroy,
     DeploymentContext,
     FinishDeployment,
     RoundFacts,
@@ -41,6 +42,13 @@ class SliceManagerClient:
         await self._request(
             "POST",
             f"/internal/deployments/{deployment_id}/inventory/commit",
+        )
+
+    async def commit_destroy(self, deployment_id: int, request: CommitDestroy) -> None:
+        await self._request(
+            "POST",
+            f"/internal/deployments/{deployment_id}/destroy/commit",
+            json=request.model_dump(mode="json"),
         )
 
     async def get_server_directory(self, slice_id: int) -> list[ServerHost]:

@@ -50,6 +50,7 @@ async def run_worker() -> None:
             activities.build_adapter_actions,
             activities.create_inventory,
             activities.commit_inventory,
+            activities.commit_destroy,
             activities.get_server_directory,
         ],
     )

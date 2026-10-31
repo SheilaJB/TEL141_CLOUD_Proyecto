@@ -65,6 +65,11 @@ class StartDeployment(ContractModel):
     event_id: str
 
 
+class CommitDestroy(ContractModel):
+    node_ids: list[UUID] = Field(default_factory=list)
+    complete: bool
+
+
 class FinishDeployment(ContractModel):
     event_id: str
     outcome: DeploymentOutcome

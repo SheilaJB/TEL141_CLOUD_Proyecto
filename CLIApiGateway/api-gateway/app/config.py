@@ -35,7 +35,6 @@ UPSTREAMS = {
     "slices": os.getenv("ORCHESTRATOR_SLICE_MANAGER_URL", os.getenv("SLICE_MANAGER_URL", "http://slice-manager:8000")),
     "cruds": os.getenv("CRUDS_URL", "http://crud-service:8001"),
     "image": os.getenv("IMAGE_MANAGER_URL", "http://imagemanager:8000"),
-    "network": os.getenv("NETWORK_MANAGER_URL", "http://networkmanager:8000"),
 }
 
 MAX_BODY_SIZE = 2 * 1024 * 1024  # 2MB límite para buffer en RAM; mayor a esto o multipart usa streaming directo
@@ -96,9 +95,9 @@ def get_route_policy(path: str, method: str) -> Optional[RoutePolicy]:
             return ADMIN
         return RoutePolicy(public=False)
 
-    # Image / Network
-    if path.startswith("/image") or path.startswith("/network"):
-        return ALL_ROLES
+    # Image
+    if path.startswith("/image"):
+        return ADMIN
 
     # Por defecto, cualquier otra ruta requiere estar autenticado
     return AUTHENTICATED

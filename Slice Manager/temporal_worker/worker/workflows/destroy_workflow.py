@@ -3,27 +3,25 @@
 
 import asyncio
 from datetime import timedelta
+from uuid import UUID
 
 from contracts.adapter import AdapterActionInput, AdapterActionOutput, AdapterHost
 from contracts.errors import ErrorCode, ErrorResponse
 from contracts.plan import Action, PlanType
 from contracts.queues import (
-    ACTIVITY_COMMIT_INVENTORY,
+    ACTIVITY_COMMIT_DESTROY,
     ACTIVITY_FINALIZE_PLACEMENT,
     ACTIVITY_GET_PLAN,
     ACTIVITY_GET_SERVER_DIRECTORY,
-    ACTIVITY_RECORD_ROUND_FACTS,
     ACTIVITY_START_DEPLOYMENT,
     LINUX_QUEUE,
     ORCHESTRATOR_QUEUE,
     PLACEMENT_QUEUE,
 )
 from contracts.registry import (
-    ActionFact,
+    CommitDestroy,
     DeploymentContext,
     DeploymentOutcome,
-    RoundFacts,
-    RoundFactsResult,
 )
 from contracts.servers import ServerHost
 from temporalio import workflow
@@ -58,15 +56,15 @@ class DestroyWorkflow(WorkflowHelpers):
     @workflow.run
     async def run(self, deployment_id: int) -> str:
         try:
-            await self._execute_activity(
-                ACTIVITY_START_DEPLOYMENT,
-                deployment_id,
-                task_queue=ORCHESTRATOR_QUEUE,
-            )
             context: DeploymentContext = await self._execute_activity(
                 ACTIVITY_GET_PLAN,
                 deployment_id,
                 result_type=DeploymentContext,
+                task_queue=ORCHESTRATOR_QUEUE,
+            )
+            await self._execute_activity(
+                ACTIVITY_START_DEPLOYMENT,
+                deployment_id,
                 task_queue=ORCHESTRATOR_QUEUE,
             )
             if context.plan.type != PlanType.DESTROY:
@@ -77,15 +75,22 @@ class DestroyWorkflow(WorkflowHelpers):
                 )
 
             actions = [action for round_actions in context.plan.rounds for action in round_actions]
+            destroyed: list[UUID] = []
+            host_failure: ErrorResponse | None = None
             if actions:
-                await self._destroy_hosts(context, actions)
+                destroyed, host_failure = await self._destroy_hosts(context, actions)
 
-            # Secuenciales y en este orden (P11): ambos bloquean el deployment.
+            # Única escritura de DELETED (P26); también en fallo parcial, antes de elevar el error.
             await self._execute_activity(
-                ACTIVITY_COMMIT_INVENTORY,
+                ACTIVITY_COMMIT_DESTROY,
                 deployment_id,
+                CommitDestroy(node_ids=destroyed, complete=host_failure is None),
                 task_queue=ORCHESTRATOR_QUEUE,
             )
+            if host_failure is not None:
+                raise DeploymentStepFailed(host_failure)
+
+            # Secuenciales y en este orden (P11): ambos bloquean el deployment.
             await self._execute_activity(
                 ACTIVITY_FINALIZE_PLACEMENT,
                 deployment_id,
@@ -107,7 +112,8 @@ class DestroyWorkflow(WorkflowHelpers):
 
     async def _destroy_hosts(
         self, context: DeploymentContext, actions: list[Action]
-    ) -> None:
+    ) -> tuple[list[UUID], ErrorResponse | None]:
+        # Solo ejecuta en los hosts; no escribe en BD (P26). Devuelve los nodos destruidos.
         directory: list[ServerHost] = await self._execute_activity(
             ACTIVITY_GET_SERVER_DIRECTORY,
             context.slice_id,
@@ -156,51 +162,15 @@ class DestroyWorkflow(WorkflowHelpers):
             return_exceptions=True,
         )
 
-        facts: list[ActionFact] = []
+        destroyed: list[UUID] = []
         failures: list[ErrorResponse] = []
-        for request, result in zip(requests, results, strict=True):
-            action = request.action
+        for result in results:
             if isinstance(result, BaseException):
                 if not isinstance(result, Exception):
                     raise result
-                error = self._error_from_exception(result)
-                failures.append(error)
-                facts.append(
-                    ActionFact(
-                        action_id=action.id,
-                        op=action.op,
-                        succeeded=False,
-                        target_id=action.target.id,
-                        error=error,
-                    )
-                )
+                failures.append(self._error_from_exception(result))
             else:
-                facts.append(
-                    ActionFact(
-                        action_id=action.id,
-                        op=action.op,
-                        succeeded=True,
-                        target_id=action.target.id,
-                        facts=result.facts,
-                    )
+                destroyed.extend(
+                    UUID(str(item)) for item in result.facts.get("destroyed_vms", [])
                 )
-
-        # Limpiando dejan sus nodos deleted y un reintento solo toca el resto.
-        record: RoundFactsResult = await self._execute_activity(
-            ACTIVITY_RECORD_ROUND_FACTS,
-            context.deployment_id,
-            RoundFacts(
-                event_id=f"{context.deployment_id}:destroy:r1",
-                round_num=1,
-                actions=facts,
-            ),
-            result_type=RoundFactsResult,
-            task_queue=ORCHESTRATOR_QUEUE,
-        )
-        for warning in record.warnings:
-            workflow.logger.warning(
-                "Destroy facts were not fully persisted",
-                extra={"deployment_id": context.deployment_id, "warning": warning},
-            )
-        if failures:
-            raise DeploymentStepFailed(failures[0])
+        return destroyed, (failures[0] if failures else None)

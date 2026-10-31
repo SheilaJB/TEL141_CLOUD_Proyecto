@@ -8,12 +8,14 @@ from contracts.network import NetworkAllocation, NetworkPortAllocation
 from contracts.plan import ActionOp, DeploymentPlan
 from contracts.queues import (
     ACTIVITY_BUILD_ADAPTER_ACTIONS,
+    ACTIVITY_COMMIT_DESTROY,
     ACTIVITY_COMMIT_INVENTORY,
     ACTIVITY_CREATE_INVENTORY,
     ACTIVITY_GET_SERVER_DIRECTORY,
 )
 from contracts.registry import (
     ApprovalState,
+    CommitDestroy,
     DeploymentContext,
     FinishDeployment,
     RoundFacts,
@@ -256,6 +258,10 @@ class DeploymentActivities:
     @activity.defn(name=ACTIVITY_COMMIT_INVENTORY)
     async def commit_inventory(self, deployment_id: int) -> None:
         await self._slice_manager.commit_inventory(deployment_id)
+
+    @activity.defn(name=ACTIVITY_COMMIT_DESTROY)
+    async def commit_destroy(self, deployment_id: int, request: CommitDestroy) -> None:
+        await self._slice_manager.commit_destroy(deployment_id, request)
 
     @activity.defn(name=ACTIVITY_GET_SERVER_DIRECTORY)
     async def get_server_directory(self, slice_id: int) -> list[ServerHost]:

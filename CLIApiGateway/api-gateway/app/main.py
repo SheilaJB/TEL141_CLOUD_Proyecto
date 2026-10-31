@@ -88,11 +88,6 @@ def _resolve_target_url(path: str, query: str = "") -> str:
         base = UPSTREAMS["image"].rstrip("/")
         target = f"{base}{clean_path}"
 
-    # 5. Network Manager
-    elif clean_path.startswith("/network"):
-        base = UPSTREAMS["network"].rstrip("/")
-        target = f"{base}{clean_path}"
-
     else:
         # Fallback a servicio auth o slice
         base = UPSTREAMS["slices"].rstrip("/")

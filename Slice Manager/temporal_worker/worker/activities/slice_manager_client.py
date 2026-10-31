@@ -55,11 +55,6 @@ class SliceManagerClient:
         )
         return ApprovalState.model_validate(response)
 
-    async def reserve_placement(
-        self, request: PlacementReserveRequest
-    ) -> PlacementReserveResponse:
-        XXX
-
     async def start_deployment(
         self, deployment_id: int, request: StartDeployment
     ) -> None:

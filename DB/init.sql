@@ -161,10 +161,10 @@ INSERT INTO slices.servidor (ip_serv, mac_serv, total_cpu_cores, total_ram_mb, t
     ('192.168.201.1', 'fa:16:3e:6d:2a:ec', 4, 3490, 7000, 1),       -- server 1
     ('192.168.201.2', 'fa:16:3e:0c:21:0d', 4, 3490, 7300, 2),       -- server 2
     ('192.168.201.3', 'fa:16:3e:05:b2:5d', 4, 3490, 7100, 2),       -- server 3
-    ('192.168.201.4', 'fa:16:3e:05:b2:5d', 4, 3490, 7100, 2);       -- server 4
+    ('192.168.201.4', 'fa:16:3e:71:e4:8e', 4, 3490, 7100, 2);       -- server 4
     -- ('192.168.202.2', 'fa:16:3e:ee:0c:46', 4, 3100X, 6400X, 3),    -- worker 1
     -- ('192.168.202.3', 'fa:16:3e:24:7d:00', 4, 3100X, 6400X, 3),     -- worker 2
-    -- ('192.168.202.3', 'fa:16:3e:d3:f3:4d', 4, 3100X, 6400X, 3);     -- worker 3
+    -- ('192.168.202.4', 'fa:16:3e:d3:f3:4d', 4, 3100X, 6400X, 3);     -- worker 3
 
 CREATE TABLE slices.image (
     id                      SERIAL PRIMARY KEY,
@@ -176,7 +176,7 @@ CREATE TABLE slices.image (
     estado                  TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (estado IN ('ACTIVE', 'DEPRECATED', 'DELETED'))
 );
 
-INSERT INTO slices.image (nombre, cluster_compatible, ruta_referencia) VALUES
+INSERT INTO slices.image (nombre, cluster_compatible, ruta_referencia, diskmb_size) VALUES
     ('Cirros', 1, 'cirros-0.6.2-x86_64-disk.img', 150),
     -- ('Linux Alpine', 1, '/images/alpine.qcow2'),
     ('Ubuntu', 1, 'focal-server-cloudimg-amd64.img', 2350);
@@ -374,6 +374,7 @@ CREATE TABLE slices.deployment (             -- una fila por intento. ejem. actu
     workflow_id         TEXT UNIQUE,                     -- id del workflow temporal
     plan                JSONB,                                 -- changeset congelado
     error               JSONB,                                 -- errores del despliegue
+    reserved_at         TIMESTAMP DEFAULT NULL,
     solicitado_por      INTEGER NOT NULL REFERENCES auth.usuario(id),
     created_at          TIMESTAMP NOT NULL DEFAULT now(),
     finished_at         TIMESTAMP

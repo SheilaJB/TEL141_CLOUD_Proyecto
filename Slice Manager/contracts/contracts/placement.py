@@ -55,17 +55,3 @@ class PlacementRollbackRequest(ContractModel):
 class PlacementRollbackResponse(ContractModel):
     deployment_id: int = Field(gt=0)
     status: PlacementStatus = PlacementStatus.RELEASED
-
-
-class PlacementReleaseRequest(ContractModel):
-    # Libera las reservas de todos los nodos (DESTROY)
-
-    deployment_id: int = Field(gt=0)
-
-
-class PlacementReleaseResponse(ContractModel):
-    deployment_id: int = Field(gt=0)
-    status: PlacementStatus = PlacementStatus.RELEASED
-    released_nodes: int = Field(default=0, ge=0)
-    #(bandera temporal)
-    simulated: bool = False

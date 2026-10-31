@@ -6,11 +6,10 @@ from uuid import UUID
 from contracts.adapter import AdapterActionInput, AdapterActionOutput
 from contracts.compute import ComputeAllocation, ComputePlacement
 from contracts.errors import ErrorCode, ErrorResponse
-from contracts.plan import Action, ActionOp, Executor
+from contracts.plan import Action, ActionOp, Executor, PlanType
 from contracts.network import NetworkAllocation
 from contracts.placement import PlacementReserveResponse, PlacementStatus, PlacementResult
 from contracts.queues import (
-    ACTIVITY_FINISH_DEPLOYMENT,
     ACTIVITY_GET_APPROVAL_STATE,
     ACTIVITY_GET_PLAN,
     ACTIVITY_RECORD_ROUND_FACTS,
@@ -39,66 +38,25 @@ from contracts.registry import (
     ApprovalStatus,
     DeploymentContext,
     DeploymentOutcome,
-    FinishDeployment,
     RoundFacts,
     RoundFactsResult,
 )
 from temporalio import workflow
-from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 
+from temporal_worker.worker.workflows.common import (
+    ADAPTER_ACTIVITY_TIMEOUT,
+    ADAPTER_RETRY_POLICY,
+    COMPENSATION_RETRY_POLICY,
+    LONG_ADAPTER_ACTIVITY_TIMEOUT,
+    PLACEMENT_ACTIVITY_TIMEOUT,
+    PLACEMENT_RETRY_POLICY,
+    REGISTRY_ACTIVITY_TIMEOUT,
+    REGISTRY_RETRY_POLICY,
+    DeploymentStepFailed,
+    WorkflowHelpers,
+)
 
-REGISTRY_ACTIVITY_TIMEOUT = timedelta(seconds=30)
-PLACEMENT_ACTIVITY_TIMEOUT = timedelta(seconds=45)
-ADAPTER_ACTIVITY_TIMEOUT = timedelta(seconds=60)
-LONG_ADAPTER_ACTIVITY_TIMEOUT = timedelta(minutes=5)
-REGISTRY_RETRY_POLICY = RetryPolicy(
-    initial_interval=timedelta(seconds=1),
-    backoff_coefficient=2,
-    maximum_interval=timedelta(seconds=30),
-    maximum_attempts=10,
-    non_retryable_error_types=[
-        ErrorCode.INVALID_SPEC.value,
-        ErrorCode.RESOURCE_NOT_FOUND.value,
-        ErrorCode.CONFLICT.value,
-    ],
-)
-PLACEMENT_RETRY_POLICY = RetryPolicy(
-    initial_interval=timedelta(seconds=2),
-    backoff_coefficient=2,
-    maximum_interval=timedelta(seconds=15),
-    maximum_attempts=3,
-    non_retryable_error_types=[
-        ErrorCode.INVALID_SPEC.value,
-        ErrorCode.CAPACITY_EXCEEDED.value,
-        ErrorCode.RESOURCE_NOT_FOUND.value,
-        ErrorCode.CONFLICT.value,
-    ],
-)
-ADAPTER_RETRY_POLICY = RetryPolicy(
-    initial_interval=timedelta(seconds=2),
-    backoff_coefficient=2,
-    maximum_interval=timedelta(seconds=30),
-    maximum_attempts=5,
-    non_retryable_error_types=[
-        ErrorCode.INVALID_SPEC.value,
-        ErrorCode.CAPACITY_EXCEEDED.value,
-        ErrorCode.RESOURCE_NOT_FOUND.value,
-        ErrorCode.CONFLICT.value,
-    ],
-)
-COMPENSATION_RETRY_POLICY = RetryPolicy(
-    initial_interval=timedelta(seconds=2),
-    backoff_coefficient=2,
-    maximum_interval=timedelta(minutes=1),
-    maximum_attempts=10,
-    non_retryable_error_types=[
-        ErrorCode.INVALID_SPEC.value,
-        ErrorCode.CAPACITY_EXCEEDED.value,
-        ErrorCode.RESOURCE_NOT_FOUND.value,
-        ErrorCode.CONFLICT.value,
-    ],
-)
 ADAPTER_ACTIVITIES = {
     ActionOp.CREATE_VM: "create_vm",
     ActionOp.DELETE_VM: "delete_vm",
@@ -119,14 +77,8 @@ INVERSE_OPERATIONS = {
 }
 
 
-class DeploymentStepFailed(Exception):
-    def __init__(self, error: ErrorResponse) -> None:
-        self.error = error
-        super().__init__(error.message)
-
-
 @workflow.defn(name="DeployWorkflow")
-class DeployWorkflow:
+class DeployWorkflow(WorkflowHelpers):
     def __init__(self) -> None:
         self._approval: tuple[bool, int | None, str | None] | None = None
 
@@ -207,6 +159,14 @@ class DeployWorkflow:
                 result_type=DeploymentContext,
                 task_queue=ORCHESTRATOR_QUEUE,
             )
+            if context.plan.type != PlanType.DEPLOY:
+                failure = ErrorResponse(
+                    code=ErrorCode.CONFLICT,
+                    message=f"DeployWorkflow received a {context.plan.type.value} plan",
+                    retryable=False,
+                )
+                await self._finish(deployment_id, DeploymentOutcome.FAILED, failure)
+                return DeploymentOutcome.FAILED.value
             await self._execute_activity(
                 ACTIVITY_CREATE_INVENTORY,
                 deployment_id,
@@ -214,7 +174,7 @@ class DeployWorkflow:
                 retry_policy=REGISTRY_RETRY_POLICY,
             )
             reserve_task = None
-            if context.plan.reservation.allocate or context.plan.reservation.resize:
+            if context.plan.reservation.allocate:
                 reservation_attempted = True
                 reserve_task = self._execute_activity(
                     ACTIVITY_RESERVE_PLACEMENT,
@@ -350,7 +310,6 @@ class DeployWorkflow:
             inventory_committed = True
             if (
                 context.plan.reservation.allocate
-                or context.plan.reservation.resize
                 or context.plan.reservation.release
             ):
                 await self._execute_activity(
@@ -622,56 +581,3 @@ class DeployWorkflow:
                 "after": inverse_after,
             }
         )
-
-    async def _finish(
-        self,
-        deployment_id: int,
-        outcome: DeploymentOutcome,
-        error: ErrorResponse | None = None,
-        *,
-        operator_id: int | None = None,
-    ) -> None:
-        await self._execute_activity(
-            ACTIVITY_FINISH_DEPLOYMENT,
-            deployment_id,
-            FinishDeployment(
-                event_id=f"{deployment_id}:finish",
-                outcome=outcome,
-                operator_id=operator_id,
-                error=error,
-            ),
-            task_queue=ORCHESTRATOR_QUEUE,
-        )
-
-    async def _execute_activity(
-        self,
-        activity_name: str,
-        *args: Any,
-        result_type: type[Any] | None = None,
-        task_queue: str,
-        start_to_close_timeout: timedelta = REGISTRY_ACTIVITY_TIMEOUT,
-        retry_policy: RetryPolicy = REGISTRY_RETRY_POLICY,
-    ) -> Any:
-        return await workflow.execute_activity(
-            activity_name,
-            args=list(args),
-            result_type=result_type,
-            task_queue=task_queue,
-            start_to_close_timeout=start_to_close_timeout,
-            retry_policy=retry_policy,
-        )
-
-    @staticmethod
-    def _error_from_exception(error: Exception) -> ErrorResponse:
-        current: Exception = error
-        while isinstance(current, ActivityError) and isinstance(current.cause, Exception):
-            current = current.cause
-        raw_code = current.type if isinstance(current, ApplicationError) else None
-        try:
-            code = ErrorCode(raw_code) if raw_code is not None else ErrorCode.BACKEND_UNAVAILABLE
-        except ValueError:
-            code = ErrorCode.BACKEND_UNAVAILABLE
-        retryable = not (
-            isinstance(current, ApplicationError) and current.non_retryable
-        )
-        return ErrorResponse(code=code, message=str(current), retryable=retryable)

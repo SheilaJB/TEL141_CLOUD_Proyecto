@@ -62,6 +62,7 @@ class CatalogFlavor:
 class CatalogImage:
     name: str
     reference: str
+    disk_size: int
     catalog_id: int
     cluster_compatible: str | None
 

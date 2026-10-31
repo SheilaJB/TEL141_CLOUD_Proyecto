@@ -17,14 +17,6 @@ from contracts.registry import (
     StartDeployment,
 )
 from contracts.servers import ServerHost
-from contracts.placement import (
-    PlacementReleaseRequest,
-    PlacementReleaseResponse,
-    PlacementReserveRequest,
-    PlacementReserveResponse,
-    PlacementRollbackRequest,
-    PlacementRollbackResponse,
-)
 from slice_manager.app.config import Settings
 from slice_manager.app.domain.capabilities import load_capabilities
 from slice_manager.app.domain.errors import (
@@ -88,6 +80,7 @@ class SliceService:
 
         async with self._pool.acquire() as connection:
             async with connection.transaction():
+                await self._repository.lock_slice_owner(connection, slice_id)
                 context = await self._repository.lock_initial_deploy_context(
                     connection,
                     slice_id=slice_id,
@@ -503,31 +496,6 @@ class SliceService:
             async with connection.transaction():
                 try:
                     await self._repository.commit_inventory(connection, deployment_id)
-                except LookupError as exc:
-                    raise ResourceNotFoundError(str(exc)) from exc
-                except ValueError as exc:
-                    raise ConflictError(str(exc)) from exc
-
-    async def release_placement(
-        self, request: PlacementReleaseRequest
-    ) -> PlacementReleaseResponse:
-        if not self._settings.placement_release_enabled:
-            # Bandera falsa
-            logger.warning(
-                "Placement release SIMULATED (ORCHESTRATOR_PLACEMENT_RELEASE_ENABLED=false); "
-                "server reserved counters were NOT decremented",
-                extra={"deployment_id": request.deployment_id},
-            )
-            return PlacementReleaseResponse(
-                deployment_id=request.deployment_id,
-                simulated=True,
-            )
-        async with self._pool.acquire() as connection:
-            async with connection.transaction():
-                try:
-                    return await self._repository.release_destroy_placement(
-                        connection, request
-                    )
                 except LookupError as exc:
                     raise ResourceNotFoundError(str(exc)) from exc
                 except ValueError as exc:

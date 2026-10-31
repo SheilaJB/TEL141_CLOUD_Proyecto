@@ -325,8 +325,3 @@ class DeploymentActivities:
             },
         )
         await self._slice_manager.finish_deployment(deployment_id, finish)
-
-    @activity.defn(name=ACTIVITY_RELEASE_PLACEMENT)
-    async def release_placement(
-        self, deployment_id: int
-    ) -> PlacementReleaseResponse:

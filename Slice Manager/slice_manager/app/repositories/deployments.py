@@ -30,6 +30,19 @@ _SUPPORTED_ACTION_FACTS: dict[ActionOp, frozenset[str]] = {
 
 
 class DeploymentRepository:
+    async def lock_slice_owner(
+        self, connection: asyncpg.Connection, slice_id: int
+    ) -> None:
+        await connection.fetchval(
+            """
+            SELECT u.id
+            FROM auth.usuario AS u
+            WHERE u.id = (SELECT s.usuario_id FROM slices.slice AS s WHERE s.id = $1)
+            FOR UPDATE OF u
+            """,
+            slice_id,
+        )
+
     async def lock_initial_deploy_context(
         self,
         connection: asyncpg.Connection,
@@ -161,7 +174,7 @@ class DeploymentRepository:
         )
         image_rows = await connection.fetch(
             """
-            SELECT i.id, i.nombre, i.ruta_referencia, c.nombre AS cluster_name
+            SELECT i.id, i.nombre, i.ruta_referencia, c.nombre AS cluster_name, i.diskmb_size
             FROM slices.image AS i
             LEFT JOIN slices.cluster AS c ON c.id = i.cluster_compatible
             WHERE i.estado = 'ACTIVE'
@@ -184,6 +197,7 @@ class DeploymentRepository:
             row["nombre"]: CatalogImage(
                 name=row["nombre"],
                 reference=row["ruta_referencia"],
+                disk_size=row["diskmb_size"],
                 catalog_id=row["id"],
                 cluster_compatible=row["cluster_name"],
             )
@@ -213,46 +227,58 @@ class DeploymentRepository:
         if not zone_allowed:
             return "The user's service level is not allowed in this availability zone"
 
-        quotas = await connection.fetch(
+        rows = await connection.fetch(
             """
-            SELECT q.recurso,
-                   COALESCE(o.prometido, q.prometido) AS promised
-            FROM auth.cuota AS q
+            WITH mapa (recurso_plan, recurso_inv) AS (
+                VALUES ('vcpu', 'vcpu'), ('ram_mb', 'vram_mb'), ('disk_mb', 'vdisk_mb')
+            ),
+            reservado AS (
+                SELECT rn.recurso, COALESCE(SUM(rn.cantidad_reservada), 0) AS total
+                FROM slices.reserva_nodo AS rn
+                JOIN slices.slice_nodo AS sn ON sn.id = rn.nodo_id
+                JOIN slices.slice AS s ON s.id = sn.slice_id
+                WHERE s.usuario_id = $1 AND rn.estado = 'RESERVED'
+                GROUP BY rn.recurso
+            ),
+            pendiente AS (
+                SELECT m.recurso_plan,
+                       COALESCE(SUM(GREATEST(0, COALESCE(
+                           (d.plan->'summary'->'resource_delta'->>m.recurso_plan)::bigint,
+                           0))), 0) AS total
+                FROM mapa AS m
+                CROSS JOIN slices.deployment AS d
+                JOIN slices.slice AS s ON s.id = d.slice_id
+                WHERE s.usuario_id = $1
+                  AND d.estado IN ('PENDING', 'IN_PROGRESS')
+                  AND d.reserved_at IS NULL
+                GROUP BY m.recurso_plan
+            )
+            SELECT m.recurso_plan AS recurso,
+                   COALESCE((SELECT r.total FROM reservado AS r
+                             WHERE r.recurso = m.recurso_inv), 0)::bigint AS reservado,
+                   COALESCE((SELECT p.total FROM pendiente AS p
+                             WHERE p.recurso_plan = m.recurso_plan), 0)::bigint AS pendiente,
+                   COALESCE(o.prometido, q.prometido) AS cuota
+            FROM mapa AS m
+            LEFT JOIN auth.cuota AS q
+              ON q.nivel_id = $2 AND q.recurso = m.recurso_plan
             LEFT JOIN auth.cuota_override AS o
-              ON o.usuario_id = $1 AND o.recurso = q.recurso
-            WHERE q.nivel_id = $2
+              ON o.usuario_id = $1 AND o.recurso = m.recurso_plan
             """,
             user_id,
             service_level_id,
         )
-        quota_by_resource = {
-            row["recurso"]: Decimal(row["promised"]) for row in quotas
-        }
-        usage_rows = await connection.fetch(
-            """
-            SELECT r.recurso, COALESCE(SUM(r.cantidad_reservada), 0)::bigint AS amount
-            FROM slices.reserva_nodo AS r
-            JOIN slices.slice_nodo AS node ON node.id = r.nodo_id
-            JOIN slices.slice AS s ON s.id = node.slice_id
-            WHERE s.usuario_id = $1 AND r.estado = 'RESERVED'
-            GROUP BY r.recurso
-            """,
-            user_id,
-        )
-        usage_keys = {"vcpu": "vcpu", "vram_mb": "ram_mb", "vdisk_mb": "disk_mb"}
-        current_usage = {
-            usage_keys[row["recurso"]]: Decimal(row["amount"])
-            for row in usage_rows
-            if row["recurso"] in usage_keys
-        }
-        quota_keys = {"vcpu": "vcpu", "ram_mb": "ram_mb", "disk_mb": "disk_mb"}
-        for resource, increase in resource_delta.items():
-            current = current_usage.get(resource, 0)
-            quota = quota_by_resource.get(quota_keys[resource])
-            if quota is None or current + increase > quota:
+        usage_by_resource = {row["recurso"]: row for row in rows}
+        for resource, delta in resource_delta.items():
+            row = usage_by_resource[resource]
+            demand = max(0, delta)
+            used = row["reservado"] + row["pendiente"]
+            quota = None if row["cuota"] is None else Decimal(row["cuota"])
+            if quota is None or used + demand > quota:
                 return (
                     f"Quota exceeded for {resource}: "
-                    f"reserved={current}, requested={increase}, quota={quota}"
+                    f"reserved={row['reservado']}, pending={row['pendiente']}, "
+                    f"requested={demand}, quota={quota}"
                 )
         return None
 
@@ -1111,82 +1137,6 @@ class DeploymentRepository:
             WHERE id = $1
             """,
             slice_id,
-        )
-
-    async def release_destroy_placement(
-        self,
-        connection: asyncpg.Connection,
-        request: PlacementReleaseRequest,
-    ) -> PlacementReleaseResponse:
-        #Liberacion REAL de reservas + plan DESTROY  
-        deployment = await connection.fetchrow(
-            "SELECT tipo, plan FROM slices.deployment WHERE id = $1 FOR UPDATE",
-            request.deployment_id,
-        )
-        if deployment is None:
-            raise LookupError(f"deployment {request.deployment_id} was not found")
-        if deployment["tipo"] != "DESTROY":
-            raise ValueError("placement release only applies to DESTROY deployments")
-        plan = DeploymentPlan.model_validate_json(deployment["plan"])
-        node_ids = [item.node_id for item in plan.reservation.release]
-        if not node_ids:
-            return PlacementReleaseResponse(deployment_id=request.deployment_id)
-
-        server_ids = await connection.fetch(
-            """
-            SELECT DISTINCT servidor_id
-            FROM slices.reserva_nodo
-            WHERE nodo_id = ANY($1::uuid[]) AND estado = 'RESERVED'
-            ORDER BY servidor_id
-            """,
-            node_ids,
-        )
-        await connection.fetch(
-            """
-            SELECT id FROM slices.servidor
-            WHERE id = ANY($1::integer[])
-            ORDER BY id
-            FOR UPDATE
-            """,
-            [item["servidor_id"] for item in server_ids],
-        )
-        released_rows = await connection.fetch(
-            """
-            UPDATE slices.reserva_nodo
-            SET estado = 'RELEASED', fecha_liberacion = now()
-            WHERE nodo_id = ANY($1::uuid[]) AND estado = 'RESERVED'
-            RETURNING nodo_id, servidor_id, recurso, cantidad_reservada
-            """,
-            node_ids,
-        )
-        released_by_server: dict[int, list[int]] = {}
-        resource_indexes = {"vcpu": 0, "vram_mb": 1, "vdisk_mb": 2}
-        for item in released_rows:
-            index = resource_indexes.get(item["recurso"])
-            if index is None:
-                raise ValueError(f"unsupported reserved resource {item['recurso']!r}")
-            amounts = released_by_server.setdefault(item["servidor_id"], [0, 0, 0])
-            amounts[index] += item["cantidad_reservada"]
-        for server_id, amounts in released_by_server.items():
-            result = await connection.execute(
-                """
-                UPDATE slices.servidor
-                SET vcpu_reserved = vcpu_reserved - $2,
-                    vram_mb_reserved = vram_mb_reserved - $3,
-                    vdisk_mb_reserved = vdisk_mb_reserved - $4
-                WHERE id = $1
-                  AND vcpu_reserved >= $2
-                  AND vram_mb_reserved >= $3
-                  AND vdisk_mb_reserved >= $4
-                """,
-                server_id,
-                *amounts,
-            )
-            if not result.endswith(" 1"):
-                raise ValueError("server reserved counters are inconsistent with Placement rows")
-        return PlacementReleaseResponse(
-            deployment_id=request.deployment_id,
-            released_nodes=len({item["nodo_id"] for item in released_rows}),
         )
 
     async def _finish_destroy(

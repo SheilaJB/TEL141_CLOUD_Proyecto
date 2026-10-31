@@ -94,6 +94,14 @@ public class ResourceReservationServiceImpl implements ResourceReservationServic
             FOR UPDATE OF d, s
             """;
 
+    private static final String MARK_RESERVED = """
+            UPDATE slices.deployment SET reserved_at = now() WHERE id = ?
+            """;
+
+    private static final String CLEAR_RESERVED = """
+            UPDATE slices.deployment SET reserved_at = NULL WHERE id = ?
+            """;
+
     private final JdbcTemplate jdbcTemplate;
     private final PlacementSnapshotService snapshotService;
     private final PlacementEngine placementEngine;
@@ -110,6 +118,12 @@ public class ResourceReservationServiceImpl implements ResourceReservationServic
     @Override
     @Transactional
     public PlacementSolution reserve(long deploymentId) {
+        PlacementSolution solution = reserveInternal(deploymentId);
+        jdbcTemplate.update(MARK_RESERVED, deploymentId);
+        return solution;
+    }
+
+    private PlacementSolution reserveInternal(long deploymentId) {
         PlacementSnapshot snapshot = snapshotService.load(deploymentId);
         Map<UUID, NodeReservation> existingByNode = PlacementSnapshot.byNode(snapshot.activeReservations());
         List<ExistingAllocation> committedAllocations = loadDeploymentReservations(deploymentId);
@@ -196,6 +210,7 @@ public class ResourceReservationServiceImpl implements ResourceReservationServic
         jdbcTemplate.query(LOCK_DEPLOYMENT, (rs, row) -> rs.getInt("slice_id"), deploymentId)
                 .stream().findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("Deployment not found: " + deploymentId));
+        jdbcTemplate.update(CLEAR_RESERVED, deploymentId);
         List<ExistingAllocation> created = loadDeploymentReservations(deploymentId).stream()
                 .filter(row -> "RESERVED".equals(row.status()))
                 .toList();

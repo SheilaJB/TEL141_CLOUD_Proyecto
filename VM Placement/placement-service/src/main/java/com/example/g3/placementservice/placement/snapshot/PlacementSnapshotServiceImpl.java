@@ -157,7 +157,7 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
 
     public PlacementSnapshotServiceImpl(
             JdbcTemplate jdbcTemplate,
-            @Value("${placement.flavor-referencia:small}") String referenceFlavor,
+            @Value("${placement.flavor-referencia:small-v1}") String referenceFlavor,
             @Value("${placement.umbral-consolidacion-t:0.5}") BigDecimal consolidationThreshold,
             @Value("${placement.w2:1}") BigDecimal convexWeight,
             @Value("${placement.s4-fraccion-w1:0.1}") BigDecimal sliceWeightFraction,

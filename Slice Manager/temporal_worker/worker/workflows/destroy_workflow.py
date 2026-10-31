@@ -3,27 +3,25 @@
 
 import asyncio
 from datetime import timedelta
-from typing import Any
 
 from contracts.adapter import AdapterActionInput, AdapterActionOutput, AdapterHost
 from contracts.errors import ErrorCode, ErrorResponse
-from contracts.placement import PlacementReleaseResponse
 from contracts.plan import Action, PlanType
 from contracts.queues import (
-    ACTIVITY_FINISH_DEPLOYMENT,
+    ACTIVITY_COMMIT_INVENTORY,
+    ACTIVITY_FINALIZE_PLACEMENT,
     ACTIVITY_GET_PLAN,
     ACTIVITY_GET_SERVER_DIRECTORY,
     ACTIVITY_RECORD_ROUND_FACTS,
-    ACTIVITY_RELEASE_PLACEMENT,
     ACTIVITY_START_DEPLOYMENT,
     LINUX_QUEUE,
     ORCHESTRATOR_QUEUE,
+    PLACEMENT_QUEUE,
 )
 from contracts.registry import (
     ActionFact,
     DeploymentContext,
     DeploymentOutcome,
-    FinishDeployment,
     RoundFacts,
     RoundFactsResult,
 )
@@ -32,11 +30,12 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 
-from temporal_worker.worker.workflows.deploy_workflow import (
+from temporal_worker.worker.workflows.common import (
     LONG_ADAPTER_ACTIVITY_TIMEOUT,
-    REGISTRY_ACTIVITY_TIMEOUT,
-    REGISTRY_RETRY_POLICY,
-    DeployWorkflow,
+    PLACEMENT_ACTIVITY_TIMEOUT,
+    PLACEMENT_RETRY_POLICY,
+    DeploymentStepFailed,
+    WorkflowHelpers,
 )
 
 DESTROY_HOST_ACTIVITY = "destroy_slice_host"
@@ -54,14 +53,8 @@ DESTROY_RETRY_POLICY = RetryPolicy(
 )
 
 
-class DestroyStepFailed(Exception):
-    def __init__(self, error: ErrorResponse) -> None:
-        self.error = error
-        super().__init__(error.message)
-
-
 @workflow.defn(name="DestroyWorkflow")
-class DestroyWorkflow:
+class DestroyWorkflow(WorkflowHelpers):
     @workflow.run
     async def run(self, deployment_id: int) -> str:
         try:
@@ -87,25 +80,27 @@ class DestroyWorkflow:
             if actions:
                 await self._destroy_hosts(context, actions)
 
-            release: PlacementReleaseResponse = await self._execute_activity(
-                ACTIVITY_RELEASE_PLACEMENT,
+            # Secuenciales y en este orden (P11): ambos bloquean el deployment.
+            await self._execute_activity(
+                ACTIVITY_COMMIT_INVENTORY,
                 deployment_id,
-                result_type=PlacementReleaseResponse,
                 task_queue=ORCHESTRATOR_QUEUE,
             )
-            if release.simulated:
-                workflow.logger.warning(
-                    "Placement release was simulated; server reservations were not freed",
-                    extra={"deployment_id": deployment_id},
-                )
+            await self._execute_activity(
+                ACTIVITY_FINALIZE_PLACEMENT,
+                deployment_id,
+                task_queue=PLACEMENT_QUEUE,
+                start_to_close_timeout=PLACEMENT_ACTIVITY_TIMEOUT,
+                retry_policy=PLACEMENT_RETRY_POLICY,
+            )
 
             await self._finish(deployment_id, DeploymentOutcome.COMPLETED)
             return DeploymentOutcome.COMPLETED.value
-        except (ActivityError, ApplicationError, DestroyStepFailed) as exc:
+        except (ActivityError, ApplicationError, DeploymentStepFailed) as exc:
             failure = (
                 exc.error
-                if isinstance(exc, DestroyStepFailed)
-                else DeployWorkflow._error_from_exception(exc)
+                if isinstance(exc, DeploymentStepFailed)
+                else self._error_from_exception(exc)
             )
             await self._finish(deployment_id, DeploymentOutcome.FAILED, failure)
             return DeploymentOutcome.FAILED.value
@@ -168,7 +163,7 @@ class DestroyWorkflow:
             if isinstance(result, BaseException):
                 if not isinstance(result, Exception):
                     raise result
-                error = DeployWorkflow._error_from_exception(result)
+                error = self._error_from_exception(result)
                 failures.append(error)
                 facts.append(
                     ActionFact(
@@ -208,39 +203,4 @@ class DestroyWorkflow:
                 extra={"deployment_id": context.deployment_id, "warning": warning},
             )
         if failures:
-            raise DestroyStepFailed(failures[0])
-
-    async def _finish(
-        self,
-        deployment_id: int,
-        outcome: DeploymentOutcome,
-        error: ErrorResponse | None = None,
-    ) -> None:
-        await self._execute_activity(
-            ACTIVITY_FINISH_DEPLOYMENT,
-            deployment_id,
-            FinishDeployment(
-                event_id=f"{deployment_id}:finish",
-                outcome=outcome,
-                error=error,
-            ),
-            task_queue=ORCHESTRATOR_QUEUE,
-        )
-
-    async def _execute_activity(
-        self,
-        activity_name: str,
-        *args: Any,
-        result_type: type[Any] | None = None,
-        task_queue: str,
-        start_to_close_timeout: timedelta = REGISTRY_ACTIVITY_TIMEOUT,
-        retry_policy: RetryPolicy = REGISTRY_RETRY_POLICY,
-    ) -> Any:
-        return await workflow.execute_activity(
-            activity_name,
-            args=list(args),
-            result_type=result_type,
-            task_queue=task_queue,
-            start_to_close_timeout=start_to_close_timeout,
-            retry_policy=retry_policy,
-        )
+            raise DeploymentStepFailed(failures[0])

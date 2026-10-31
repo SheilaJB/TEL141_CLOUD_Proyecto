@@ -210,3 +210,53 @@ class ClusterMetrics(BaseModel):
     total_vcpu_allocated: int
     total_vram_mb_allocated: int
     total_vdisk_mb_allocated: int
+
+
+class AdminQuotaItem(BaseModel):
+    id: int
+    nivel_id: int
+    nivel_nombre: str
+    recurso: str
+    prometido: float
+
+
+class UpdateQuotaRequest(BaseModel):
+    nivel_id: int
+    recurso: str
+    prometido: float
+
+
+class SliceInterventionRequest(BaseModel):
+    accion: str
+    motivo: str
+
+
+class AuditEvent(BaseModel):
+    id: int
+    timestamp: datetime
+    usuario_id: Optional[int] = None
+    codigo_usuario: Optional[str] = None
+    tipo_evento: str
+    severidad: str
+    entidad: Optional[str] = None
+    entidad_id: Optional[str] = None
+    descripcion: str
+    ip_origen: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class SecurityPurgeRequest(BaseModel):
+    slice_id: int
+    motivo: str
+
+
+class SecurityAnomaly(BaseModel):
+    slice_id: int
+    slice_nombre: str
+    usuario_id: int
+    usuario_codigo: str
+    tipo_anomalia: str
+    severidad: str
+    detalle: str
+    fecha_deteccion: datetime
+

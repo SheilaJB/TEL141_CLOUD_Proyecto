@@ -18,6 +18,12 @@ from app.schemas import (
     UserIdentity,
     UserQuotaSummary,
     ZoneResponse,
+    AdminQuotaItem,
+    UpdateQuotaRequest,
+    SliceInterventionRequest,
+    AuditEvent,
+    SecurityPurgeRequest,
+    SecurityAnomaly,
 )
 
 router = APIRouter(tags=["Consultas de Estado y Catálogo"])
@@ -232,3 +238,131 @@ async def get_cluster_metrics(
             detail="Acceso exclusivo para rol administrador.",
         )
     return await repo.get_cluster_metrics()
+
+
+# -----------------------------------------------------------------------------
+# Endpoints Administrativos Exclusivos (Políticas, Cuotas, Zonas, Intervención)
+# -----------------------------------------------------------------------------
+
+@router.get("/admin/quotas", response_model=List[AdminQuotaItem])
+async def get_admin_quotas(
+    repo: QueryRepository = Depends(get_repo),
+    identity: UserIdentity = Depends(get_user_identity),
+):
+    if identity.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso exclusivo para rol administrador.")
+    return await repo.list_admin_quotas()
+
+
+@router.put("/admin/quotas")
+async def update_admin_quota(
+    body: UpdateQuotaRequest,
+    repo: QueryRepository = Depends(get_repo),
+    identity: UserIdentity = Depends(get_user_identity),
+):
+    if identity.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso exclusivo para rol administrador.")
+    ok = await repo.update_admin_quota(body.nivel_id, body.recurso, body.prometido)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cuota no encontrada para el nivel y recurso.")
+    return {"ok": True, "nivel_id": body.nivel_id, "recurso": body.recurso, "prometido": body.prometido}
+
+
+@router.post("/admin/slices/{slice_id}/intervene")
+async def admin_intervene_slice(
+    slice_id: int,
+    body: SliceInterventionRequest,
+    repo: QueryRepository = Depends(get_repo),
+    identity: UserIdentity = Depends(get_user_identity),
+):
+    if identity.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores pueden intervenir slices.")
+    if not body.motivo or len(body.motivo.strip()) < 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debe proporcionar un motivo administrativo justificado y documentado para la intervención."
+        )
+    if body.accion.upper() not in {"STOP", "DELETE"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Acción inválida. Use STOP o DELETE.")
+
+    res = await repo.intervene_slice(slice_id, body.accion, body.motivo.strip(), identity.user_id)
+    if not res.get("ok"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=res.get("error", "Error en intervención."))
+    return res
+
+
+@router.patch("/admin/zones/{zone_id}/toggle")
+async def admin_toggle_zone(
+    zone_id: int,
+    repo: QueryRepository = Depends(get_repo),
+    identity: UserIdentity = Depends(get_user_identity),
+):
+    if identity.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso exclusivo para rol administrador.")
+    res = await repo.toggle_zone(zone_id)
+    if not res.get("ok"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=res.get("error"))
+    return res
+
+
+@router.patch("/admin/flavors/{flavor_id}/toggle")
+async def admin_toggle_flavor(
+    flavor_id: int,
+    repo: QueryRepository = Depends(get_repo),
+    identity: UserIdentity = Depends(get_user_identity),
+):
+    if identity.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso exclusivo para rol administrador.")
+    res = await repo.toggle_flavor(flavor_id)
+    if not res.get("ok"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=res.get("error"))
+    return res
+
+
+# -----------------------------------------------------------------------------
+# Endpoints de Auditoría, Logs y Seguridad de Plataforma
+# -----------------------------------------------------------------------------
+
+@router.get("/admin/audit-logs", response_model=List[AuditEvent])
+async def list_audit_logs(
+    limit: int = Query(100, ge=1, le=500),
+    tipo_evento: Optional[str] = Query(None, description="Filtrar por tipo de evento"),
+    severidad: Optional[str] = Query(None, description="Filtrar por severidad: INFO, WARNING, CRITICAL"),
+    search: Optional[str] = Query(None, description="Búsqueda por usuario o descripción"),
+    repo: QueryRepository = Depends(get_repo),
+    identity: UserIdentity = Depends(get_user_identity),
+):
+    if identity.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso exclusivo para rol administrador.")
+    return await repo.list_audit_logs(limit=limit, tipo_evento=tipo_evento, severidad=severidad, search=search)
+
+
+@router.get("/admin/security/anomalies", response_model=List[SecurityAnomaly])
+async def detect_security_anomalies(
+    repo: QueryRepository = Depends(get_repo),
+    identity: UserIdentity = Depends(get_user_identity),
+):
+    if identity.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso exclusivo para rol administrador.")
+    return await repo.detect_security_anomalies()
+
+
+@router.post("/admin/security/purge")
+async def admin_security_purge(
+    body: SecurityPurgeRequest,
+    repo: QueryRepository = Depends(get_repo),
+    identity: UserIdentity = Depends(get_user_identity),
+):
+    if identity.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores pueden ejecutar purgas de seguridad.")
+    if not body.motivo or len(body.motivo.strip()) < 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debe proporcionar un motivo de seguridad documentado para justificar la purga."
+        )
+
+    res = await repo.purge_slice_security(body.slice_id, body.motivo.strip(), identity.user_id)
+    if not res.get("ok"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=res.get("error", "Error en purga."))
+    return res
+

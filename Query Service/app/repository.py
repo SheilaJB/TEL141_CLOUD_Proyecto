@@ -1,5 +1,6 @@
-import json
+from datetime import datetime
 from typing import Any, Dict, List, Optional
+import json
 import asyncpg
 from app.schemas import (
     ClusterMetrics,
@@ -15,9 +16,12 @@ from app.schemas import (
     SliceSummary,
     SliceTopology,
     TemplateResponse,
+    AdminQuotaItem,
     UserAdminView,
     UserQuotaSummary,
     ZoneResponse,
+    AuditEvent,
+    SecurityAnomaly,
 )
 
 
@@ -689,3 +693,391 @@ class QueryRepository:
             total_vram_mb_allocated=int(server_stats["total_vram"]) if server_stats else 0,
             total_vdisk_mb_allocated=int(server_stats["total_vdisk"]) if server_stats else 0,
         )
+
+    # -------------------------------------------------------------------------
+    # Métodos Administrativos Exclusivos
+    # -------------------------------------------------------------------------
+
+    async def list_admin_quotas(self) -> List[AdminQuotaItem]:
+        query = """
+            SELECT c.id, c.nivel_id, n.nombre AS nivel_nombre, c.recurso, c.prometido
+            FROM auth.cuota c
+            JOIN auth.nivel n ON c.nivel_id = n.id
+            ORDER BY c.nivel_id ASC, c.recurso ASC
+        """
+        rows = await self.pool.fetch(query)
+        return [AdminQuotaItem(**dict(r)) for r in rows]
+
+    async def update_admin_quota(self, nivel_id: int, recurso: str, prometido: float) -> bool:
+        query = """
+            UPDATE auth.cuota
+            SET prometido = $1
+            WHERE nivel_id = $2 AND recurso = $3
+        """
+        result = await self.pool.execute(query, prometido, nivel_id, recurso)
+        if result != "UPDATE 0":
+            try:
+                await self.record_audit_event(
+                    tipo_evento="QUOTA_UPDATED",
+                    severidad="INFO",
+                    descripcion=f"Actualización de cuota para Nivel #{nivel_id}: Recurso [{recurso}] ajustado a {prometido}",
+                    entidad="CUOTA",
+                    entidad_id=f"Nivel_{nivel_id}_{recurso}"
+                )
+            except Exception:
+                pass
+            return True
+        return False
+
+    async def intervene_slice(self, slice_id: int, accion: str, motivo: str, admin_id: int) -> Dict[str, Any]:
+        """
+        Intervención administrativa de slices justificada (STOP o DELETE).
+        Registra motivo y cambia estado en slices.slice y slices.slice_nodo.
+        """
+        nuevo_estado = "STOPPED" if accion.upper() == "STOP" else "ELIMINATED"
+        nodo_estado = "STOPPED" if accion.upper() == "STOP" else "DELETED"
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                # Actualizar slice
+                row = await conn.fetchrow(
+                    """
+                    UPDATE slices.slice
+                    SET estado = $1, fecha_modificacion = NOW()
+                    WHERE id = $2
+                    RETURNING id, nombre, estado, usuario_id
+                    """,
+                    nuevo_estado, slice_id
+                )
+                if not row:
+                    return {"ok": False, "error": f"Slice #{slice_id} no encontrado."}
+
+                # Actualizar nodos
+                await conn.execute(
+                    """
+                    UPDATE slices.slice_nodo
+                    SET estado_nodo = $1
+                    WHERE slice_id = $2
+                    """,
+                    nodo_estado, slice_id
+                )
+
+                # Liberar reservas si se elimina
+                if nuevo_estado == "ELIMINATED":
+                    await conn.execute(
+                        """
+                        UPDATE slices.servidor s
+                        SET vcpu_reserved = GREATEST(0, s.vcpu_reserved - COALESCE(sub.vcpu, 0)),
+                            vram_mb_reserved = GREATEST(0, s.vram_mb_reserved - COALESCE(sub.ram, 0)),
+                            vdisk_mb_reserved = GREATEST(0, s.vdisk_mb_reserved - COALESCE(sub.disk, 0))
+                        FROM (
+                            SELECT n.servidor_id, SUM(f.vcpu) as vcpu, SUM(f.vram_mb) as ram, SUM(f.vdisk_mb) as disk
+                            FROM slices.slice_nodo n
+                            JOIN slices.flavor f ON n.flavor_id = f.id
+                            WHERE n.slice_id = $1 AND n.servidor_id IS NOT NULL
+                            GROUP BY n.servidor_id
+                        ) sub
+                        WHERE s.id = sub.servidor_id
+                        """,
+                        slice_id
+                    )
+
+                admin_codigo = await conn.fetchval("SELECT codigo FROM auth.usuario WHERE id = $1", admin_id) or f"Admin#{admin_id}"
+                await conn.execute(
+                    """
+                    INSERT INTO auth.auditoria_eventos (
+                        usuario_id, codigo_usuario, tipo_evento, severidad,
+                        entidad, entidad_id, descripcion, ip_origen
+                    )
+                    VALUES ($1, $2, 'ADMIN_INTERVENTION', 'WARNING', 'SLICE', $3, $4, '127.0.0.1')
+                    """,
+                    admin_id, admin_codigo, str(slice_id),
+                    f"Intervención administrativa sobre Slice #{slice_id} ('{row['nombre']}'): Acción [{accion.upper()}] — Motivo: {motivo}"
+                )
+
+                return {
+                    "ok": True,
+                    "slice_id": slice_id,
+                    "accion": accion.upper(),
+                    "nuevo_estado": nuevo_estado,
+                    "motivo": motivo,
+                    "admin_id": admin_id
+                }
+
+    async def toggle_zone(self, zone_id: int) -> Dict[str, Any]:
+        async with self.pool.acquire() as conn:
+            current = await conn.fetchval("SELECT estado FROM slices.zona_disponibilidad WHERE id = $1", zone_id)
+            if not current:
+                return {"ok": False, "error": "Zona no encontrada"}
+            nuevo = "DISABLED" if current == "ACTIVE" else "ACTIVE"
+            await conn.execute("UPDATE slices.zona_disponibilidad SET estado = $1 WHERE id = $2", nuevo, zone_id)
+            try:
+                await self.record_audit_event(
+                    tipo_evento="CATALOG_MODIFIED",
+                    severidad="INFO",
+                    descripcion=f"Zona de disponibilidad #{zone_id} cambiada a estado [{nuevo}]",
+                    entidad="ZONA",
+                    entidad_id=str(zone_id)
+                )
+            except Exception:
+                pass
+            return {"ok": True, "zone_id": zone_id, "estado": nuevo}
+
+    async def toggle_flavor(self, flavor_id: int) -> Dict[str, Any]:
+        async with self.pool.acquire() as conn:
+            current = await conn.fetchval("SELECT activo FROM slices.flavor WHERE id = $1", flavor_id)
+            if current is None:
+                return {"ok": False, "error": "Flavor no encontrado"}
+            nuevo = not current
+            await conn.execute("UPDATE slices.flavor SET activo = $1 WHERE id = $2", nuevo, flavor_id)
+            try:
+                await self.record_audit_event(
+                    tipo_evento="CATALOG_MODIFIED",
+                    severidad="INFO",
+                    descripcion=f"Sabor (Flavor) #{flavor_id} cambiado a [{ 'ACTIVO' if nuevo else 'INACTIVO' }]",
+                    entidad="FLAVOR",
+                    entidad_id=str(flavor_id)
+                )
+            except Exception:
+                pass
+            return {"ok": True, "flavor_id": flavor_id, "activo": nuevo}
+
+    # -------------------------------------------------------------------------
+    # Auditoría, Seguridad y Detección de Consumo Indebido
+    # -------------------------------------------------------------------------
+
+    async def list_audit_logs(
+        self,
+        limit: int = 100,
+        tipo_evento: Optional[str] = None,
+        severidad: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> List[AuditEvent]:
+        conditions = []
+        params = []
+        idx = 1
+
+        if tipo_evento and tipo_evento.upper() != "ALL":
+            conditions.append(f"tipo_evento = ${idx}")
+            params.append(tipo_evento)
+            idx += 1
+
+        if severidad and severidad.upper() != "ALL":
+            conditions.append(f"severidad = ${idx}")
+            params.append(severidad.upper())
+            idx += 1
+
+        if search and search.strip():
+            conditions.append(f"(codigo_usuario ILIKE ${idx} OR descripcion ILIKE ${idx} OR entidad_id ILIKE ${idx})")
+            params.append(f"%{search.strip()}%")
+            idx += 1
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        query = f"""
+            SELECT id, timestamp, usuario_id, codigo_usuario, tipo_evento, severidad,
+                   entidad, entidad_id, descripcion, ip_origen, metadata
+            FROM auth.auditoria_eventos
+            {where_clause}
+            ORDER BY timestamp DESC, id DESC
+            LIMIT ${idx}
+        """
+        params.append(limit)
+
+        rows = await self.pool.fetch(query, *params)
+        results = []
+        for r in rows:
+            d = dict(r)
+            if isinstance(d.get("metadata"), str):
+                try:
+                    d["metadata"] = json.loads(d["metadata"])
+                except Exception:
+                    d["metadata"] = {}
+            results.append(AuditEvent(**d))
+        return results
+
+    async def record_audit_event(
+        self,
+        tipo_evento: str,
+        severidad: str,
+        descripcion: str,
+        usuario_id: Optional[int] = None,
+        codigo_usuario: Optional[str] = None,
+        entidad: Optional[str] = None,
+        entidad_id: Optional[str] = None,
+        ip_origen: str = "127.0.0.1",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        query = """
+            INSERT INTO auth.auditoria_eventos (
+                usuario_id, codigo_usuario, tipo_evento, severidad,
+                entidad, entidad_id, descripcion, ip_origen, metadata
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+            RETURNING id
+        """
+        meta_json = json.dumps(metadata) if metadata else "{}"
+        return await self.pool.fetchval(
+            query, usuario_id, codigo_usuario, tipo_evento, severidad,
+            entidad, entidad_id, descripcion, ip_origen, meta_json
+        )
+
+    async def purge_slice_security(
+        self,
+        slice_id: int,
+        motivo: str,
+        admin_id: int
+    ) -> Dict[str, Any]:
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                slice_info = await conn.fetchrow(
+                    """
+                    SELECT s.id, s.nombre, s.usuario_id, u.codigo as usuario_codigo, s.estado
+                    FROM slices.slice s
+                    JOIN auth.usuario u ON s.usuario_id = u.id
+                    WHERE s.id = $1
+                    """,
+                    slice_id
+                )
+                if not slice_info:
+                    return {"ok": False, "error": f"Slice #{slice_id} no encontrado."}
+
+                admin_codigo = await conn.fetchval("SELECT codigo FROM auth.usuario WHERE id = $1", admin_id) or f"Admin#{admin_id}"
+
+                # 1. Marcar Slice como ELIMINATED
+                await conn.execute("UPDATE slices.slice SET estado = 'ELIMINATED', fecha_modificacion = NOW() WHERE id = $1", slice_id)
+
+                # 2. Marcar nodos como TERMINATED
+                await conn.execute("UPDATE slices.slice_nodo SET estado_nodo = 'TERMINATED' WHERE slice_id = $1", slice_id)
+
+                # 3. Liberar reservas en servidores físicos
+                await conn.execute(
+                    """
+                    UPDATE slices.servidor s
+                    SET vcpu_reserved = GREATEST(0, s.vcpu_reserved - COALESCE(sub.vcpu, 0)),
+                        vram_mb_reserved = GREATEST(0, s.vram_mb_reserved - COALESCE(sub.ram, 0)),
+                        vdisk_mb_reserved = GREATEST(0, s.vdisk_mb_reserved - COALESCE(sub.disk, 0))
+                    FROM (
+                        SELECT n.servidor_id, SUM(f.vcpu) as vcpu, SUM(f.vram_mb) as ram, SUM(f.vdisk_mb) as disk
+                        FROM slices.slice_nodo n
+                        JOIN slices.flavor f ON n.flavor_id = f.id
+                        WHERE n.slice_id = $1 AND n.servidor_id IS NOT NULL
+                        GROUP BY n.servidor_id
+                    ) sub
+                    WHERE s.id = sub.servidor_id
+                    """,
+                    slice_id
+                )
+
+                # 4. Cancelar despliegues activos en slices.deployment
+                await conn.execute(
+                    """
+                    UPDATE slices.deployment
+                    SET estado = 'COMPENSATED', finished_at = NOW(),
+                        error = jsonb_build_object('motivo', $2, 'accion', 'SECURITY_PURGE')
+                    WHERE slice_id = $1 AND estado IN ('PENDING', 'IN_PROGRESS')
+                    """,
+                    slice_id, motivo
+                )
+
+                # 5. Registrar evento de auditoría CRÍTICO de purga
+                audit_desc = (
+                    f"PURGA DE SEGURIDAD EJECUTADA: Slice #{slice_id} ('{slice_info['nombre']}') del usuario "
+                    f"[{slice_info['usuario_codigo']}] fue ELIMINADO FORZOSAMENTE por el administrador [{admin_codigo}]. "
+                    f"Recursos liberados inmediatamente. Justificación: {motivo}"
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO auth.auditoria_eventos (
+                        usuario_id, codigo_usuario, tipo_evento, severidad,
+                        entidad, entidad_id, descripcion, ip_origen, metadata
+                    )
+                    VALUES ($1, $2, 'SECURITY_PURGE', 'CRITICAL', 'SLICE', $3, $4, '127.0.0.1', $5::jsonb)
+                    """,
+                    admin_id, admin_codigo, str(slice_id), audit_desc,
+                    json.dumps({
+                        "slice_id": slice_id,
+                        "slice_nombre": slice_info["nombre"],
+                        "propietario_id": slice_info["usuario_id"],
+                        "propietario_codigo": slice_info["usuario_codigo"],
+                        "motivo_seguridad": motivo
+                    })
+                )
+
+                return {
+                    "ok": True,
+                    "slice_id": slice_id,
+                    "slice_nombre": slice_info["nombre"],
+                    "propietario": slice_info["usuario_codigo"],
+                    "accion": "SECURITY_PURGE",
+                    "estado_anterior": slice_info["estado"],
+                    "nuevo_estado": "ELIMINATED",
+                    "motivo": motivo
+                }
+
+    async def detect_security_anomalies(self) -> List[Dict[str, Any]]:
+        query = """
+            SELECT s.id as slice_id, s.nombre as slice_nombre, s.usuario_id, u.codigo as usuario_codigo,
+                   u.estado as usuario_estado, s.estado as slice_estado,
+                   COALESCE(SUM(f.vcpu), 0) as vcpu_usado,
+                   COALESCE(SUM(f.vram_mb), 0) as ram_usada,
+                   COALESCE(SUM(f.vdisk_mb), 0) as disk_usado,
+                   q_vcpu.prometido as quota_vcpu,
+                   q_ram.prometido as quota_ram,
+                   q_disk.prometido as quota_disk
+            FROM slices.slice s
+            JOIN auth.usuario u ON s.usuario_id = u.id
+            LEFT JOIN slices.slice_nodo n ON s.id = n.slice_id AND n.estado_nodo NOT IN ('TERMINATED', 'ERROR')
+            LEFT JOIN slices.flavor f ON n.flavor_id = f.id
+            LEFT JOIN auth.cuota q_vcpu ON u.nivel_id = q_vcpu.nivel_id AND q_vcpu.recurso = 'vcpu'
+            LEFT JOIN auth.cuota q_ram ON u.nivel_id = q_ram.nivel_id AND q_ram.recurso = 'ram_mb'
+            LEFT JOIN auth.cuota q_disk ON u.nivel_id = q_disk.nivel_id AND q_disk.recurso = 'disk_mb'
+            WHERE s.estado IN ('RUNNING', 'UPDATING')
+            GROUP BY s.id, s.nombre, s.usuario_id, u.codigo, u.estado, s.estado,
+                     q_vcpu.prometido, q_ram.prometido, q_disk.prometido
+        """
+        rows = await self.pool.fetch(query)
+        anomalies = []
+        now = datetime.now()
+
+        for r in rows:
+            # 1. Chequeo de usuario inactivo / bloqueado con slices activos
+            if r["usuario_estado"] in {"BLOCKED", "INACTIVE"}:
+                anomalies.append({
+                    "slice_id": r["slice_id"],
+                    "slice_nombre": r["slice_nombre"],
+                    "usuario_id": r["usuario_id"],
+                    "usuario_codigo": r["usuario_codigo"],
+                    "tipo_anomalia": "CUENTA_BLOQUEADA_CON_SLICES",
+                    "severidad": "CRITICAL",
+                    "detalle": f"El slice se encuentra en ejecución activa pero la cuenta propietaria [{r['usuario_codigo']}] está en estado {r['usuario_estado']}.",
+                    "fecha_deteccion": now
+                })
+
+            # 2. Chequeo de exceso de cuota por slice individual
+            if r["quota_vcpu"] and r["vcpu_usado"] > r["quota_vcpu"]:
+                anomalies.append({
+                    "slice_id": r["slice_id"],
+                    "slice_nombre": r["slice_nombre"],
+                    "usuario_id": r["usuario_id"],
+                    "usuario_codigo": r["usuario_codigo"],
+                    "tipo_anomalia": "EXCESO_CUOTA_VCPU",
+                    "severidad": "CRITICAL",
+                    "detalle": f"Consumo indebido de vCPUs ({r['vcpu_usado']} cores) superando el límite asignado por nivel ({r['quota_vcpu']} cores).",
+                    "fecha_deteccion": now
+                })
+
+            if r["quota_ram"] and r["ram_usada"] > r["quota_ram"]:
+                anomalies.append({
+                    "slice_id": r["slice_id"],
+                    "slice_nombre": r["slice_nombre"],
+                    "usuario_id": r["usuario_id"],
+                    "usuario_codigo": r["usuario_codigo"],
+                    "tipo_anomalia": "EXCESO_CUOTA_RAM",
+                    "severidad": "CRITICAL",
+                    "detalle": f"Consumo indebido de Memoria RAM ({r['ram_usada']} MB) superando el límite de cuota ({r['quota_ram']} MB).",
+                    "fecha_deteccion": now
+                })
+
+        return anomalies
+
+

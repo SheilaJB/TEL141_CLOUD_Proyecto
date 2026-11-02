@@ -1,11 +1,24 @@
-"""Helpers compartidos por los workflows (sin lógica de negocio)."""
-
+import asyncio
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
+from contracts.adapter import AdapterActionOutput
 from contracts.errors import ErrorCode, ErrorResponse
-from contracts.queues import ACTIVITY_FINISH_DEPLOYMENT, ORCHESTRATOR_QUEUE
-from contracts.registry import DeploymentOutcome, FinishDeployment
+from contracts.plan import Action
+from contracts.queues import (
+    ACTIVITY_FINISH_DEPLOYMENT,
+    ACTIVITY_RECORD_ROUND_FACTS,
+    ORCHESTRATOR_QUEUE,
+)
+from contracts.registry import (
+    ActionFact,
+    DeploymentOutcome,
+    FinishDeployment,
+    RoundFacts,
+    RoundFactsResult,
+)
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
@@ -69,8 +82,80 @@ class DeploymentStepFailed(Exception):
         super().__init__(error.message)
 
 
+@dataclass
+class RoundsProgress:
+    reversibility_reached: bool = False
+
+
 class WorkflowHelpers:
-    """Mixin con el wrapper de activities, el cierre y el mapeo de errores."""
+    async def run_rounds(
+        self,
+        *,
+        deployment_id: int,
+        rounds: list[list[Action]],
+        dispatch: Callable[[Action], Awaitable[AdapterActionOutput]],
+        point_of_no_return: int | None = None,
+        record_facts: bool = False,
+        on_round_success: Callable[[list[Action]], None] | None = None,
+        progress: RoundsProgress | None = None,
+    ) -> None:
+        for round_num, actions in enumerate(rounds, start=1):
+            results = await asyncio.gather(
+                *[dispatch(action) for action in actions],
+                return_exceptions=True,
+            )
+            facts: list[ActionFact] = []
+            failures: list[ErrorResponse] = []
+            succeeded: list[Action] = []
+            for action, result in zip(actions, results, strict=True):
+                if isinstance(result, Exception):
+                    error = self._error_from_exception(result)
+                    facts.append(
+                        ActionFact(
+                            action_id=action.id,
+                            op=action.op,
+                            succeeded=False,
+                            target_id=action.target.id,
+                            error=error,
+                        )
+                    )
+                    failures.append(error)
+                else:
+                    facts.append(
+                        ActionFact(
+                            action_id=action.id,
+                            op=action.op,
+                            succeeded=True,
+                            target_id=action.target.id,
+                            facts=result.facts,
+                        )
+                    )
+                    succeeded.append(action)
+            if on_round_success is not None:
+                on_round_success(succeeded)
+            if record_facts:
+                record_result: RoundFactsResult = await self._execute_activity(
+                    ACTIVITY_RECORD_ROUND_FACTS,
+                    deployment_id,
+                    RoundFacts(
+                        event_id=f"{deployment_id}:r{round_num}",
+                        round_num=round_num,
+                        actions=facts,
+                    ),
+                    result_type=RoundFactsResult,
+                    task_queue=ORCHESTRATOR_QUEUE,
+                )
+                for warning in record_result.warnings:
+                    workflow.logger.warning(
+                        "Deployment facts were not fully persisted",
+                        extra={"deployment_id": deployment_id, "warning": warning},
+                    )
+            if (progress is not None
+                and point_of_no_return is not None
+                and round_num >= point_of_no_return):
+                progress.reversibility_reached = True
+            if failures:
+                raise DeploymentStepFailed(failures[0])
 
     async def _finish(
         self,

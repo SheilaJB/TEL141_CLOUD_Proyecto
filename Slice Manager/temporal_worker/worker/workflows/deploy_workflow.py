@@ -12,7 +12,6 @@ from contracts.placement import PlacementReserveResponse, PlacementStatus, Place
 from contracts.queues import (
     ACTIVITY_GET_APPROVAL_STATE,
     ACTIVITY_GET_PLAN,
-    ACTIVITY_RECORD_ROUND_FACTS,
     ACTIVITY_RESERVE_PLACEMENT,
     ACTIVITY_ROLLBACK_PLACEMENT,
     ACTIVITY_START_DEPLOYMENT,
@@ -33,13 +32,10 @@ from contracts.queues import (
 )
 from contracts.servers import ServerHost
 from contracts.registry import (
-    ActionFact,
     ApprovalState,
     ApprovalStatus,
     DeploymentContext,
     DeploymentOutcome,
-    RoundFacts,
-    RoundFactsResult,
 )
 from temporalio import workflow
 from temporalio.exceptions import ActivityError, ApplicationError
@@ -54,6 +50,7 @@ from temporal_worker.worker.workflows.common import (
     REGISTRY_ACTIVITY_TIMEOUT,
     REGISTRY_RETRY_POLICY,
     DeploymentStepFailed,
+    RoundsProgress,
     WorkflowHelpers,
 )
 
@@ -102,7 +99,7 @@ class DeployWorkflow(WorkflowHelpers):
         network_allocation: NetworkAllocation | None = None
         prepared_actions: dict[str, AdapterActionInput] = {}
         compute_attempted = False
-        reversibility_reached = False
+        progress = RoundsProgress()
         inventory_committed = False
 
         try:
@@ -272,34 +269,22 @@ class DeployWorkflow(WorkflowHelpers):
             )
             prepared_actions = {item.action.id: item for item in prepared}
 
-            for round_num, actions in enumerate(context.plan.rounds, start=1):
-                facts, compensation_candidates, failures = await self._execute_round(
+            await self.run_rounds(
+                deployment_id=deployment_id,
+                rounds=context.plan.rounds,
+                dispatch=lambda action: self._dispatch_action(
                     context,
-                    actions,
-                    round_num,
+                    action,
                     allocation_by_node,
-                    prepared_actions,
-                )
-                applied.extend(compensation_candidates)
-                record_result = await self._execute_activity(
-                    ACTIVITY_RECORD_ROUND_FACTS,
-                    deployment_id,
-                    facts,
-                    result_type=RoundFactsResult,
-                    task_queue=ORCHESTRATOR_QUEUE,
-                )
-                for warning in record_result.warnings:
-                    workflow.logger.warning(
-                        "Deployment facts were not fully persisted",
-                        extra={"deployment_id": deployment_id, "warning": warning},
-                    )
-                if failures:
-                    raise DeploymentStepFailed(failures[0])
-                if (
-                    context.plan.point_of_no_return_round is not None
-                    and round_num >= context.plan.point_of_no_return_round
-                ):
-                    reversibility_reached = True
+                    prepared_action=prepared_actions.get(action.id),
+                ),
+                point_of_no_return=context.plan.point_of_no_return_round,
+                record_facts=True,
+                on_round_success=lambda succeeded: applied.extend(
+                    prepared_actions[action.id].action for action in succeeded
+                ),
+                progress=progress,
+            )
 
             await self._execute_activity(
                 ACTIVITY_COMMIT_INVENTORY,
@@ -327,7 +312,7 @@ class DeployWorkflow(WorkflowHelpers):
                 if isinstance(exc, DeploymentStepFailed)
                 else self._error_from_exception(exc)
             )
-            if inventory_committed or reversibility_reached:
+            if inventory_committed or progress.reversibility_reached:
                 await self._finish(
                     deployment_id,
                     DeploymentOutcome.FAILED,
@@ -363,66 +348,6 @@ class DeployWorkflow(WorkflowHelpers):
             deployment_id,
             result_type=ApprovalState,
             task_queue=ORCHESTRATOR_QUEUE,
-        )
-
-    async def _execute_round(
-        self,
-        context: DeploymentContext,
-        actions: list[Action],
-        round_num: int,
-        allocation_by_node: dict[UUID, int],
-        prepared_actions: dict[str, AdapterActionInput],
-    ) -> tuple[RoundFacts, list[Action], list[ErrorResponse]]:
-        results = await asyncio.gather(
-            *[
-                self._dispatch_action(
-                    context,
-                    action,
-                    allocation_by_node,
-                    prepared_action=prepared_actions.get(action.id),
-                )
-                for action in actions
-            ],
-            return_exceptions=True,
-        )
-        facts: list[ActionFact] = []
-        failures: list[ErrorResponse] = []
-        for action, result in zip(actions, results, strict=True):
-            if isinstance(result, Exception):
-                error = self._error_from_exception(result)
-                facts.append(
-                    ActionFact(
-                        action_id=action.id,
-                        op=action.op,
-                        succeeded=False,
-                        target_id=action.target.id,
-                        error=error,
-                    )
-                )
-                failures.append(error)
-            else:
-                facts.append(
-                    ActionFact(
-                        action_id=action.id,
-                        op=action.op,
-                        succeeded=True,
-                        target_id=action.target.id,
-                        facts=result.facts,
-                    )
-                )
-        successful_actions = [
-            prepared_actions[action.id].action
-            for action, result in zip(actions, results, strict=True)
-            if not isinstance(result, Exception)
-        ]
-        return (
-            RoundFacts(
-                event_id=f"{context.deployment_id}:r{round_num}",
-                round_num=round_num,
-                actions=facts,
-            ),
-            successful_actions,
-            failures,
         )
 
     async def _dispatch_action(

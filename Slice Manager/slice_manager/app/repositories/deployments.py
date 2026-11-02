@@ -15,7 +15,8 @@ from contracts.registry import (
     RoundFactsResult,
 )
 from slice_manager.app.planning.destroy_planner import DestroyLink, DestroyNode
-from slice_manager.app.planning.planner import CatalogFlavor, CatalogImage
+# from slice_manager.app.planning.planner import CatalogFlavor, CatalogImage
+from slice_manager.app.planning.common import CatalogFlavor, CatalogImage
 
 # Columnas de facts que el DDL actual puede persistir
 _SUPPORTED_ACTION_FACTS: dict[ActionOp, frozenset[str]] = {

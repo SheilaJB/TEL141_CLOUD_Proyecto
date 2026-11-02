@@ -18,13 +18,13 @@ from contracts.plan import (
     Intent,
     IntentKind,
     IntentTarget,
-    PlanSummary,
     PlanType,
     ReservationPlan,
     ReservationRelease,
     ResourceVector,
     TargetKind,
 )
+from slice_manager.app.planning.common import order_rounds, summarize
 
 DESTROY_INTENT_ID = "destroy-slice"
 
@@ -109,12 +109,13 @@ def build_destroy_plan(
         )
 
     zero = ResourceVector(vcpu=0, ram_mb=0, disk_mb=0)
+    rounds, point_of_no_return = order_rounds(actions)
     return DeploymentPlan(
         type=PlanType.DESTROY,
-        summary=PlanSummary(
-            disruption_max=Disruption.N2,
-            destructive=True,
-            actions=len(actions),
+        summary=summarize(
+            actions,
+            floor_disruption=Disruption.N2,
+            floor_destructive=True,
             resource_delta=zero,
             resource_total_after=zero,
         ),
@@ -125,6 +126,6 @@ def build_destroy_plan(
                 for node in sorted(nodes, key=lambda item: str(item.node_id))
             ]
         ),
-        point_of_no_return_round=1 if actions else None,
-        rounds=[actions] if actions else [],
+        point_of_no_return_round=point_of_no_return,
+        rounds=rounds,
     )

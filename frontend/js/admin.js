@@ -41,10 +41,11 @@ export const AdminView = {
         `;
 
         try {
-            const [metrics, servers, slices] = await Promise.all([
+            const [metrics, servers, slices, managersData] = await Promise.all([
                 API.query.getMetrics().catch(() => null),
                 API.query.getServers().catch(() => []),
-                API.admin.getAllSlices().catch(() => [])
+                API.admin.getAllSlices().catch(() => []),
+                API.admin.getManagersMonitoring().catch(() => null)
             ]);
 
             adminServersList = servers || [];
@@ -85,6 +86,170 @@ export const AdminView = {
                     </div>
                 </div>
             `;
+
+            // 1.2 Módulo de Gestores de Recursos: Network Manager & Compute Manager
+            const netMgr = managersData?.network_manager;
+            const compMgr = managersData?.compute_manager;
+            const consistency = managersData?.consistency;
+
+            const managersHtml = `
+                <div class="mb-6 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center">
+                                <span class="w-2.5 h-2.5 rounded-full bg-blue-600 mr-2"></span>
+                                Telemetría de Asignación Lógica: Network Manager & Compute Manager
+                            </h4>
+                            <p class="text-[11px] text-slate-500">Supervisión en tiempo real de colas de Temporal, reservas de VLAN S-TAGs, direccionamiento IPAM y displays VNC por hipervisor</p>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            ${consistency?.is_healthy ? `
+                                <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5 animate-pulse"></span>
+                                    100% CONSISTENCIA (SIN FUGAS DE RECURSOS)
+                                </span>
+                            ` : `
+                                <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 flex items-center">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5 animate-bounce"></span>
+                                    ALERTA: RECURSOS HUÉRFANOS DETECTADOS
+                                </span>
+                            `}
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- TARJETA 1: NETWORK MANAGER -->
+                        <div class="p-5 bg-white rounded-xl border border-slate-200 shadow-sm space-y-4">
+                            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                                <div>
+                                    <span class="text-[10px] font-bold uppercase tracking-wider text-blue-600">Gestor de Red</span>
+                                    <h5 class="text-sm font-bold text-slate-900">Network Manager</h5>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                        Cola: ${netMgr?.task_queue || 'network-queue'}
+                                    </span>
+                                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                        ${netMgr?.status || 'ONLINE'}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <!-- Barra de Ocupación de S-TAGs -->
+                            <div>
+                                <div class="flex justify-between text-xs mb-1">
+                                    <span class="font-semibold text-slate-700">Capacidad VLAN S-TAGs (100 - 999)</span>
+                                    <span class="font-bold text-slate-900">${netMgr?.used_stags_count || 0} / ${netMgr?.total_stags_available || 900} (${netMgr?.usage_pct || 0}%)</span>
+                                </div>
+                                <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden border border-slate-200">
+                                    <div class="bg-blue-600 h-2.5 rounded-full transition-all duration-500" style="width: ${Math.max(netMgr?.usage_pct || 0, 1)}%"></div>
+                                </div>
+                                <div class="flex justify-between text-[10px] text-slate-400 mt-1">
+                                    <span>Rango asignable: 100 - 999</span>
+                                    <span class="${netMgr?.risk_level === 'NORMAL' ? 'text-emerald-600 font-bold' : 'text-amber-600 font-bold'}">Riesgo Agotamiento: ${netMgr?.risk_level || 'NORMAL'}</span>
+                                </div>
+                            </div>
+
+                            <!-- Parámetros IPAM y Enlaces -->
+                            <div class="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded-lg border border-slate-100 font-mono">
+                                <div>
+                                    <span class="text-slate-400 block text-[10px] font-sans font-semibold">POOL PRIVADO P2P:</span>
+                                    <span class="font-bold text-slate-800">${netMgr?.private_p2p_base || '192.168.1.0/24'}</span>
+                                </div>
+                                <div>
+                                    <span class="text-slate-400 block text-[10px] font-sans font-semibold">VLAN ID PÚBLICA:</span>
+                                    <span class="font-bold text-slate-800">VID #${netMgr?.public_vid || 4000}</span>
+                                </div>
+                                <div class="mt-1">
+                                    <span class="text-slate-400 block text-[10px] font-sans font-semibold">ENLACES ACTIVOS:</span>
+                                    <span class="font-bold text-slate-800">${netMgr?.active_links_count || 0} enlaces</span>
+                                </div>
+                                <div class="mt-1">
+                                    <span class="text-slate-400 block text-[10px] font-sans font-semibold">PUERTOS VIRTUALES:</span>
+                                    <span class="font-bold text-slate-800">${netMgr?.active_ports_count || 0} puertos</span>
+                                </div>
+                            </div>
+
+                            ${(netMgr?.active_stags && netMgr.active_stags.length > 0) ? `
+                                <div>
+                                    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">S-TAGs Asignados en Clúster</span>
+                                    <div class="flex flex-wrap gap-1.5">
+                                        ${netMgr.active_stags.map(st => `
+                                            <span class="px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200 text-[10px] font-mono">
+                                                S-TAG <b>${st.vlan_stag}</b> (${st.slice_nombre})
+                                            </span>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            ` : `
+                                <div class="text-[11px] text-slate-400 italic">No hay S-TAGs asignados en este momento.</div>
+                            `}
+                        </div>
+
+                        <!-- TARJETA 2: COMPUTE MANAGER -->
+                        <div class="p-5 bg-white rounded-xl border border-slate-200 shadow-sm space-y-4">
+                            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                                <div>
+                                    <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-600">Gestor de Cómputo</span>
+                                    <h5 class="text-sm font-bold text-slate-900">Compute Manager</h5>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                        Cola: ${compMgr?.task_queue || 'compute-queue'}
+                                    </span>
+                                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                        ${compMgr?.status || 'ONLINE'}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <!-- Ocupación de Displays Global -->
+                            <div>
+                                <div class="flex justify-between text-xs mb-1">
+                                    <span class="font-semibold text-slate-700">Ocupación Consolas VNC (Displays 1 - 99)</span>
+                                    <span class="font-bold text-slate-900">${compMgr?.total_displays_occupied || 0} / ${compMgr?.total_displays_capacity || 0} Displays (${compMgr?.total_displays_capacity ? Math.round(((compMgr.total_displays_occupied||0) / compMgr.total_displays_capacity) * 100) : 0}%)</span>
+                                </div>
+                                <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden border border-slate-200">
+                                    <div class="bg-indigo-600 h-2.5 rounded-full transition-all duration-500" style="width: ${compMgr?.total_displays_capacity ? Math.max(Math.round(((compMgr.total_displays_occupied||0) / compMgr.total_displays_capacity) * 100), 1) : 1}%"></div>
+                                </div>
+                                <div class="flex justify-between text-[10px] text-slate-400 mt-1">
+                                    <span>Mapeo RFB: Puerto 5900 + Display</span>
+                                    <span class="${compMgr?.risk_level === 'NORMAL' ? 'text-emerald-600 font-bold' : 'text-amber-600 font-bold'}">Riesgo Displays: ${compMgr?.risk_level || 'NORMAL'}</span>
+                                </div>
+                            </div>
+
+                            <!-- Desglose por Servidor Físico -->
+                            <div class="space-y-2">
+                                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">Densidad de Displays por Hipervisor</span>
+                                <div class="space-y-1.5">
+                                    ${(compMgr?.servers || []).map(s => `
+                                        <div class="p-2.5 bg-slate-50 rounded-lg border border-slate-100 text-xs">
+                                            <div class="flex justify-between items-center mb-1">
+                                                <div class="flex items-center space-x-1.5">
+                                                    <span class="font-bold text-slate-800">Servidor #${s.server_id}</span>
+                                                    <span class="text-[10px] font-mono text-slate-500">(${s.ip_serv})</span>
+                                                </div>
+                                                <span class="font-mono text-[11px] font-bold ${s.occupied_count > 0 ? 'text-indigo-700' : 'text-slate-400'}">
+                                                    ${s.occupied_count} / ${s.total_displays} [${s.usage_pct}%]
+                                                </span>
+                                            </div>
+                                            <div class="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                                <div class="bg-indigo-500 h-1.5 rounded-full" style="width: ${Math.max(s.usage_pct, 1)}%"></div>
+                                            </div>
+                                            ${s.occupied_displays && s.occupied_displays.length > 0 ? `
+                                                <div class="text-[10px] text-slate-600 mt-1 font-mono">
+                                                    Displays en uso: ${s.occupied_displays.map(d => `:${d} (590${d})`).join(', ')}
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
 
             // 1.2 Módulo de Monitoreo en Vivo (Grafana & Prometheus)
             const monitoringHtml = `
@@ -229,6 +394,7 @@ export const AdminView = {
 
             container.innerHTML = `
                 ${metricsHtml}
+                ${managersHtml}
                 ${monitoringHtml}
                 ${serversHtml}
                 ${slicesHtml}

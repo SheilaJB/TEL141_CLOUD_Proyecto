@@ -195,6 +195,7 @@ export const API = {
         purgeSliceSecurity: async (sliceId, motivo) => request("/cruds/admin/security/purge", {
             method: "POST",
             body: JSON.stringify({ slice_id: parseInt(sliceId, 10), motivo })
-        })
+        }),
+        getManagersMonitoring: async () => request("/cruds/admin/monitoring/managers")
     }
 };

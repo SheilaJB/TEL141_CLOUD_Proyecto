@@ -260,3 +260,58 @@ class SecurityAnomaly(BaseModel):
     detalle: str
     fecha_deteccion: datetime
 
+
+class StagAllocation(BaseModel):
+    slice_id: int
+    slice_nombre: str
+    vlan_stag: int
+    cluster_id: int
+
+
+class NetworkManagerMonitoring(BaseModel):
+    task_queue: str
+    status: str
+    total_stags_available: int
+    used_stags_count: int
+    usage_pct: float
+    active_stags: List[StagAllocation]
+    private_p2p_base: str
+    public_vid: int
+    active_links_count: int
+    active_ports_count: int
+    risk_level: str
+
+
+class ServerVncAllocation(BaseModel):
+    server_id: int
+    ip_serv: str
+    estado: str
+    occupied_displays: List[int]
+    occupied_count: int
+    total_displays: int
+    usage_pct: float
+
+
+class ComputeManagerMonitoring(BaseModel):
+    task_queue: str
+    status: str
+    servers: List[ServerVncAllocation]
+    total_displays_capacity: int
+    total_displays_occupied: int
+    total_vms_mapped: int
+    risk_level: str
+
+
+class ConsistencyAudit(BaseModel):
+    is_healthy: bool
+    orphan_stags_count: int
+    orphan_displays_count: int
+    warnings: List[str]
+
+
+class ManagersMonitoringResponse(BaseModel):
+    network_manager: NetworkManagerMonitoring
+    compute_manager: ComputeManagerMonitoring
+    consistency: ConsistencyAudit
+
+

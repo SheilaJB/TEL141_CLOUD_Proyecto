@@ -22,7 +22,14 @@ from app.schemas import (
     ZoneResponse,
     AuditEvent,
     SecurityAnomaly,
+    ManagersMonitoringResponse,
+    NetworkManagerMonitoring,
+    StagAllocation,
+    ComputeManagerMonitoring,
+    ServerVncAllocation,
+    ConsistencyAudit,
 )
+
 
 
 class QueryRepository:
@@ -1079,5 +1086,159 @@ class QueryRepository:
                 })
 
         return anomalies
+
+    async def get_managers_monitoring(self) -> ManagersMonitoringResponse:
+        # 1. Network Manager: S-TAGs y direccionamiento IPAM
+        stag_rows = await self.pool.fetch(
+            """
+            SELECT id AS slice_id, nombre AS slice_nombre, vlan_stag, cluster_id
+            FROM slices.slice
+            WHERE vlan_stag IS NOT NULL AND estado <> 'ELIMINATED'
+            ORDER BY vlan_stag ASC
+            """
+        )
+        active_stags = [
+            StagAllocation(
+                slice_id=r["slice_id"],
+                slice_nombre=r["slice_nombre"],
+                vlan_stag=r["vlan_stag"],
+                cluster_id=r["cluster_id"],
+            )
+            for r in stag_rows
+        ]
+        used_stags = len(active_stags)
+        total_stags = 900  # Rango asignable: 100 a 999
+        stag_usage_pct = round((used_stags / total_stags) * 100.0, 2)
+
+        link_stats = await self.pool.fetchrow(
+            """
+            SELECT 
+                COUNT(*) AS total_links,
+                COUNT(*) FILTER (WHERE public = TRUE) AS public_links
+            FROM slices.slice_enlace
+            WHERE estado <> 'DELETED'
+            """
+        )
+        port_stats = await self.pool.fetchrow(
+            """
+            SELECT COUNT(*) AS total_ports
+            FROM slices.slice_enlace_puerto
+            WHERE estado <> 'DELETED'
+            """
+        )
+
+        net_risk = "NORMAL"
+        if stag_usage_pct >= 85:
+            net_risk = "CRITICAL"
+        elif stag_usage_pct >= 65:
+            net_risk = "WARNING"
+
+        network_manager = NetworkManagerMonitoring(
+            task_queue="network-queue",
+            status="ONLINE",
+            total_stags_available=total_stags,
+            used_stags_count=used_stags,
+            usage_pct=stag_usage_pct,
+            active_stags=active_stags,
+            private_p2p_base="192.168.1.0/24",
+            public_vid=4000,
+            active_links_count=link_stats["total_links"] if link_stats else 0,
+            active_ports_count=port_stats["total_ports"] if port_stats else 0,
+            risk_level=net_risk,
+        )
+
+        # 2. Compute Manager: Displays VNC por servidor físico
+        server_rows = await self.pool.fetch(
+            """
+            SELECT 
+                s.id AS server_id,
+                s.ip_serv,
+                s.estado,
+                ARRAY_REMOVE(ARRAY_AGG(n.vnc_display ORDER BY n.vnc_display), NULL) AS occupied_displays
+            FROM slices.servidor s
+            LEFT JOIN slices.slice_nodo n ON s.id = n.server_id AND n.estado_nodo <> 'DELETED' AND n.vnc_display IS NOT NULL
+            GROUP BY s.id, s.ip_serv, s.estado
+            ORDER BY s.id ASC
+            """
+        )
+
+        servers_vnc: List[ServerVncAllocation] = []
+        total_displays_capacity = 0
+        total_displays_occupied = 0
+        total_vms_mapped = 0
+        max_vnc_pct = 0.0
+
+        for sr in server_rows:
+            raw_displays = sr["occupied_displays"] or []
+            disp_list = [int(d) for d in raw_displays]
+            occ_count = len(disp_list)
+            u_pct = round((occ_count / 99.0) * 100.0, 2)
+            if u_pct > max_vnc_pct:
+                max_vnc_pct = u_pct
+            total_displays_capacity += 99
+            total_displays_occupied += occ_count
+            total_vms_mapped += occ_count
+
+            servers_vnc.append(
+                ServerVncAllocation(
+                    server_id=sr["server_id"],
+                    ip_serv=str(sr["ip_serv"]),
+                    estado=sr["estado"],
+                    occupied_displays=disp_list,
+                    occupied_count=occ_count,
+                    total_displays=99,
+                    usage_pct=u_pct,
+                )
+            )
+
+        comp_risk = "NORMAL"
+        if max_vnc_pct >= 85:
+            comp_risk = "CRITICAL"
+        elif max_vnc_pct >= 65:
+            comp_risk = "WARNING"
+
+        compute_manager = ComputeManagerMonitoring(
+            task_queue="compute-queue",
+            status="ONLINE",
+            servers=servers_vnc,
+            total_displays_capacity=total_displays_capacity,
+            total_displays_occupied=total_displays_occupied,
+            total_vms_mapped=total_vms_mapped,
+            risk_level=comp_risk,
+        )
+
+        # 3. Auditoría de Consistencia y Fugas de Recursos (Anti-Leaks)
+        orphan_stags_count = await self.pool.fetchval(
+            """
+            SELECT COUNT(*) FROM slices.slice 
+            WHERE estado = 'ELIMINATED' AND vlan_stag IS NOT NULL
+            """
+        ) or 0
+
+        orphan_displays_count = await self.pool.fetchval(
+            """
+            SELECT COUNT(*) FROM slices.slice_nodo 
+            WHERE estado_nodo = 'DELETED' AND vnc_display IS NOT NULL
+            """
+        ) or 0
+
+        warnings: List[str] = []
+        if orphan_stags_count > 0:
+            warnings.append(f"Se detectaron {orphan_stags_count} S-TAG(s) huérfanos retenidos en slices eliminados.")
+        if orphan_displays_count > 0:
+            warnings.append(f"Se detectaron {orphan_displays_count} Display(s) VNC huérfanos en nodos eliminados.")
+
+        consistency = ConsistencyAudit(
+            is_healthy=(orphan_stags_count == 0 and orphan_displays_count == 0),
+            orphan_stags_count=orphan_stags_count,
+            orphan_displays_count=orphan_displays_count,
+            warnings=warnings,
+        )
+
+        return ManagersMonitoringResponse(
+            network_manager=network_manager,
+            compute_manager=compute_manager,
+            consistency=consistency,
+        )
 
 

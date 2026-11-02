@@ -24,7 +24,9 @@ from app.schemas import (
     AuditEvent,
     SecurityPurgeRequest,
     SecurityAnomaly,
+    ManagersMonitoringResponse,
 )
+
 
 router = APIRouter(tags=["Consultas de Estado y Catálogo"])
 
@@ -238,6 +240,20 @@ async def get_cluster_metrics(
             detail="Acceso exclusivo para rol administrador.",
         )
     return await repo.get_cluster_metrics()
+
+
+@router.get("/admin/monitoring/managers", response_model=ManagersMonitoringResponse)
+async def get_managers_monitoring(
+    repo: QueryRepository = Depends(get_repo),
+    identity: UserIdentity = Depends(get_user_identity),
+):
+    if identity.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso exclusivo para rol administrador.",
+        )
+    return await repo.get_managers_monitoring()
+
 
 
 # -----------------------------------------------------------------------------

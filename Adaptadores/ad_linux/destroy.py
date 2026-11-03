@@ -29,6 +29,7 @@ def destroy_slice_host(request: AdapterActionInput) -> dict:
             pass
         for path in (
             config.RUN_ROOT / f"{vm_name}.pid",
+            config.STORAGE_ROOT / "overlay" / f"{vm_id}.qcow2",
             config.STORAGE_ROOT / "overlays" / f"{vm_id}.qcow2",
             config.STORAGE_ROOT / "seeds" / f"{vm_id}.iso",
         ):

@@ -1,13 +1,17 @@
-"""Action handlers for the Linux adapter.
-
-The handlers are intentionally unimplemented in this phase. They are the only
-boundary where host execution will be added later.
-"""
+"""Action handlers for the Linux adapter."""
 
 from contracts.adapter import AdapterActionInput
 
 from .destroy import destroy_slice_host
-from .network import attach_port, create_link
-from .vm import create_vm
+from .network import attach_port, create_link, detach_port, delete_link
+from .vm import create_vm, delete_vm
 
-__all__ = ["attach_port", "create_link", "create_vm", "destroy_slice_host"]
+__all__ = [
+    "attach_port",
+    "create_link",
+    "create_vm",
+    "destroy_slice_host",
+    "delete_vm",
+    "detach_port",
+    "delete_link",
+]

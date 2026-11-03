@@ -372,3 +372,51 @@ def _ensure_taps(address: str, nics: list[dict]) -> None:
             host.run(address, ["ip", "link", "show", tap_name])
         except RuntimeError as exc:
             raise NonRetryableError("TAP_MISSING") from exc
+
+def delete_vm(request: AdapterActionInput) -> dict:
+    """Mata el proceso QEMU de forma segura y elimina overlay, seed y pidfile."""
+    if request.host is None:
+        raise NonRetryableError("HOST_MISSING")
+    address = request.host.management_ip
+    vm_id = str(request.action.target.id)
+    vm_name = "vm-" + vm_id[:8]
+
+    # 1. Localizar y terminar proceso si aún corre
+    pid = None
+    for p_path in (_run_path(vm_name), _run_path(f"{vm_name}.pid")):
+        try:
+            val = host.run(address, ["cat", p_path]).strip()
+            if val.isdigit():
+                pid = val
+                break
+        except RuntimeError:
+            pass
+
+    if pid and pid.isdigit():
+        try:
+            host.run(address, ["kill", "-TERM", pid])
+            host.run(address, ["sleep", "1"])
+            try:
+                host.run(address, ["kill", "-0", pid])
+                host.run(address, ["kill", "-KILL", pid])
+            except RuntimeError:
+                pass
+        except RuntimeError:
+            pass
+
+    # 2. Eliminar archivos temporales de ejecucion y almacenamiento de la VM
+    for file_path in (
+        _run_path(vm_name),
+        _run_path(f"{vm_name}.pid"),
+        str(config.STORAGE_ROOT / "overlay" / f"{vm_id}.qcow2"),
+        str(config.STORAGE_ROOT / "overlays" / f"{vm_id}.qcow2"),
+        str(config.STORAGE_ROOT / "seeds" / f"{vm_id}.iso"),
+        str(config.STORAGE_ROOT / "seeds" / f"{vm_id}.iso.sha256"),
+        str(config.STORAGE_ROOT / "seeds" / f"{vm_id}.iso.input.sha256"),
+    ):
+        try:
+            host.run(address, ["rm", "-f", file_path])
+        except RuntimeError:
+            pass
+
+    return {"state": "DELETED"}

@@ -197,3 +197,44 @@ def _require_host(target: AdapterHost | None) -> AdapterHost:
         raise NonRetryableError("HOST_MISSING")
     _validate_host(target)
     return target
+
+def detach_port(request: AdapterActionInput) -> dict:
+    """Elimina el puerto TAP del bridge OVS y la interfaz virtual del kernel."""
+    target = _require_host(request.host)
+    ip = target.management_ip
+    port_id = _param(request, "port_id") or str(request.action.target.id)
+    tap = _tap_name(str(port_id))
+    bridge = PROVIDER_BRIDGE if _param(request, "publico") else f"br-sl-{request.slice_id}"
+
+    # Desasociar del switch OVS
+    host.run(ip, ["ovs-vsctl", "--if-exists", "del-port", bridge, tap])
+    # Eliminar dispositivo TAP del kernel Linux
+    if _link_exists(ip, tap):
+        try:
+            host.run(ip, ["ip", "link", "del", tap])
+        except RuntimeError:
+            pass
+
+    return {"tap_names": [tap]}
+
+
+def delete_link(request: AdapterActionInput) -> dict:
+    """Elimina el bridge del slice en OVS y sus interfaces de enlace."""
+    hosts = request.hosts or ([request.host] if request.host else [])
+    slice_id = request.slice_id
+    bridge = f"br-sl-{slice_id}"
+    vx = f"vx-{slice_id}"
+    vw = f"vw-{slice_id}"
+
+    for target in hosts:
+        _validate_host(target)
+        ip = target.management_ip
+        host.run(ip, ["ovs-vsctl", "--if-exists", "del-port", PROVIDER_BRIDGE, vw])
+        host.run(ip, ["ovs-vsctl", "--if-exists", "del-br", bridge])
+        if _link_exists(ip, vx):
+            try:
+                host.run(ip, ["ip", "link", "del", vx])
+            except RuntimeError:
+                pass
+
+    return {"destroyed_bridge": True}

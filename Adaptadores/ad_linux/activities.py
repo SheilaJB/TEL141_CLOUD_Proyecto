@@ -15,8 +15,11 @@ Handler = Callable[[AdapterActionInput], dict[str, Any]]
 
 _HANDLERS: dict[ActionOp, Handler] = {
     ActionOp.CREATE_LINK: handlers.create_link,
+    ActionOp.DELETE_LINK: handlers.delete_link,
     ActionOp.ATTACH_PORT: handlers.attach_port,
+    ActionOp.DETACH_PORT: handlers.detach_port,
     ActionOp.CREATE_VM: handlers.create_vm,
+    ActionOp.DELETE_VM: handlers.delete_vm,
     ActionOp.DESTROY_SLICE_HOST: handlers.destroy_slice_host,
 }
 _ALLOWED_FACTS = {
@@ -37,9 +40,37 @@ def _dispatch(request: AdapterActionInput, operation: ActionOp) -> AdapterAction
     """Dispatch one complete action without enrichment or exception masking."""
     if request.action.executor != Executor.ADAPTER:
         raise ApplicationError("EXECUTOR_MISMATCH", type="EXECUTOR_MISMATCH", non_retryable=True)
-    if request.action.op != operation:
-        raise ApplicationError("ACTION_MISMATCH", type="ACTION_MISMATCH", non_retryable=True)
-    handler = _HANDLERS[operation]
+
+    # Detectar si es una ejecucion de rollback / compensacion de Temporal
+    is_compensating = (
+        ":compensate:" in request.idempotency_key
+        or "undo:" in str(request.action.id)
+        or operation in {ActionOp.DELETE_VM, ActionOp.DETACH_PORT, ActionOp.DELETE_LINK}
+        or request.action.op in {ActionOp.DELETE_VM, ActionOp.DETACH_PORT, ActionOp.DELETE_LINK}
+    )
+
+    if is_compensating:
+        if operation in {ActionOp.CREATE_VM, ActionOp.DELETE_VM} or request.action.op in {ActionOp.CREATE_VM, ActionOp.DELETE_VM}:
+            handler = handlers.delete_vm
+            effective_op = ActionOp.DELETE_VM
+        elif operation in {ActionOp.ATTACH_PORT, ActionOp.DETACH_PORT} or request.action.op in {ActionOp.ATTACH_PORT, ActionOp.DETACH_PORT}:
+            handler = handlers.detach_port
+            effective_op = ActionOp.DETACH_PORT
+        elif operation in {ActionOp.CREATE_LINK, ActionOp.DELETE_LINK} or request.action.op in {ActionOp.CREATE_LINK, ActionOp.DELETE_LINK}:
+            handler = handlers.delete_link
+            effective_op = ActionOp.DELETE_LINK
+        elif operation == ActionOp.DESTROY_SLICE_HOST:
+            handler = handlers.destroy_slice_host
+            effective_op = ActionOp.DESTROY_SLICE_HOST
+        else:
+            handler = _HANDLERS.get(operation, _HANDLERS.get(request.action.op))
+            effective_op = operation
+    else:
+        if request.action.op != operation:
+            raise ApplicationError("ACTION_MISMATCH", type="ACTION_MISMATCH", non_retryable=True)
+        handler = _HANDLERS[operation]
+        effective_op = operation
+
     try:
         facts = handler(request)
     except NonRetryableError as exc:
@@ -97,9 +128,27 @@ async def _dispatch_async(
     return await asyncio.to_thread(_dispatch, request, operation)
 
 
+@activity.defn(name="delete_vm")
+async def delete_vm(request: AdapterActionInput) -> AdapterActionOutput:
+    return await _dispatch_async(request, ActionOp.DELETE_VM)
+
+
+@activity.defn(name="detach_port")
+async def detach_port(request: AdapterActionInput) -> AdapterActionOutput:
+    return await _dispatch_async(request, ActionOp.DETACH_PORT)
+
+
+@activity.defn(name="delete_link")
+async def delete_link(request: AdapterActionInput) -> AdapterActionOutput:
+    return await _dispatch_async(request, ActionOp.DELETE_LINK)
+
+
 ADAPTER_ACTIVITIES = [
     create_link,
+    delete_link,
     attach_port,
+    detach_port,
     create_vm,
+    delete_vm,
     destroy_slice_host,
 ]

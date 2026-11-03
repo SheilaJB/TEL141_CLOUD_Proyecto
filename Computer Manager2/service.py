@@ -32,6 +32,22 @@ def allocate_displays(
             f"Nodes missing from server_map: {', '.join(str(node) for node in missing)}",
         )
 
+    for node in nodes:
+        if node["vnc_display"] is None:
+            continue
+        if node["server_id"] is None:
+            raise NonRetryableError(
+                "PARTIAL_ALLOCATION",
+                f"Node {node['id']} has vnc_display but no server_id",
+            )
+        expected = int(server_map[UUID(str(node["id"]))])
+        if int(node["server_id"]) != expected:
+            raise NonRetryableError(
+                "SERVER_MISMATCH",
+                f"Node {node['id']} registered server_id={node['server_id']}, "
+                f"received server_id={expected}",
+            )
+
     server_ids = [
         int(server_map[UUID(str(node["id"]))])
         for node in nodes
@@ -56,7 +72,11 @@ def allocate_displays(
             server_id, repository.occupied_displays(conn, server_id)
         )
         display = choose_display(occupied)
-        repository.assign_display(conn, str(node_id), server_id, display)
+        if repository.assign_display(conn, str(node_id), server_id, display) != 1:
+            raise NonRetryableError(
+                "NODE_NOT_ASSIGNABLE",
+                f"Node {node_id} could not be assigned a display",
+            )
         occupied.add(display)
         result.append(ComputeAllocation(node_id=node_id, vnc_display=display))
     return result

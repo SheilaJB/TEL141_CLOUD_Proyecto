@@ -5,6 +5,7 @@ Scripts validacion/
 !.env.example
 *.rst
 keys
+golden
 
 __pycache__/
 .pytest_cache/

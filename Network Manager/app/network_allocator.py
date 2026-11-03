@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Mapping
 from uuid import UUID
 
 
@@ -20,6 +20,9 @@ class LinkInput:
     link_id: UUID
     public: bool
     node_ids: tuple[UUID, ...]
+    existing_cidr: ipaddress.IPv4Network | None = None
+    existing_used_ips: frozenset[ipaddress.IPv4Address] = frozenset()
+    is_existing: bool = False
 
 
 @dataclass(frozen=True)
@@ -64,10 +67,14 @@ class NetworkAllocator:
         used_private_ctags: Iterable[int] = (),
         used_public_ips: Iterable[str] = (),
         used_macs: Iterable[str] = (),
+        nic_index_floor: Mapping[UUID, int] = {},
+        existing_private_link_count: int = 0,
     ) -> tuple[list[LinkAllocation], list[PortAllocation]]:
         link_list = list(links)
-        private_links = [link for link in link_list if not link.public]
-        if len(private_links) > 32:
+        new_private_links = [
+            link for link in link_list if not link.public and not self._is_existing(link)
+        ]
+        if existing_private_link_count + len(new_private_links) > 32:
             raise NetworkAllocationError(
                 "NET_TOO_MANY_LINKS",
                 "a slice cannot contain more than 32 private links",
@@ -82,15 +89,46 @@ class NetworkAllocator:
         links_out: list[LinkAllocation] = []
         ports_out: list[PortAllocation] = []
         private_index = 0
-        next_nic_index: dict[UUID, int] = {}
+        next_nic_index: dict[UUID, int] = dict(nic_index_floor)
 
         for link in link_list:
+            existing = self._is_existing(link)
             if link.public:
-                links_out.append(LinkAllocation(link.link_id, True, None, None, None))
+                if not existing:
+                    links_out.append(
+                        LinkAllocation(link.link_id, True, None, None, None)
+                    )
                 public_ips = self._allocate_public_ips(
                     link, used_ips, used_mac_values, slice_id, next_nic_index
                 )
                 ports_out.extend(public_ips)
+                continue
+
+            if existing:
+                if link.existing_cidr is None:
+                    raise NetworkAllocationError(
+                        "NET_EXISTING_CIDR_MISSING", "existing link has no CIDR"
+                    )
+                taken = set(link.existing_used_ips)
+                free_hosts = (
+                    host for host in link.existing_cidr.hosts() if host not in taken
+                )
+                for node_id in link.node_ids:
+                    address = next(free_hosts, None)
+                    if address is None:
+                        raise NetworkAllocationError(
+                            "NET_IP_EXHAUSTED", "private CIDR is too small"
+                        )
+                    ports_out.append(
+                        self._private_port(
+                            slice_id,
+                            link,
+                            node_id,
+                            address,
+                            used_mac_values,
+                            next_nic_index,
+                        )
+                    )
                 continue
 
             prefix = self._private_prefix(len(link.node_ids))
@@ -108,26 +146,43 @@ class NetworkAllocator:
             if len(hosts) < len(link.node_ids):
                 raise NetworkAllocationError("NET_IP_EXHAUSTED", "private CIDR is too small")
             for node_id, address in zip(link.node_ids, hosts):
-                mac = self._mac(slice_id, link.link_id, node_id)
-                if mac in used_mac_values:
-                    raise NetworkAllocationError("NET_MAC_COLLISION", "MAC collision detected")
-                used_mac_values.add(mac)
-
-                nic_index = next_nic_index.get(node_id, 0) + 1
-                next_nic_index[node_id] = nic_index
-
                 ports_out.append(
-                    PortAllocation(
-                        port_id=UUID(int=(link.link_id.int ^ node_id.int)),
-                        link_id=link.link_id,
-                        node_id=node_id,
-                        public=False,
-                        ip=address,
-                        mac=mac,
-                        nic_index=nic_index,
+                    self._private_port(
+                        slice_id, link, node_id, address, used_mac_values, next_nic_index
                     )
                 )
         return links_out, ports_out
+
+    @staticmethod
+    def _is_existing(link: LinkInput) -> bool:
+        return link.is_existing or link.existing_cidr is not None
+
+    def _private_port(
+        self,
+        slice_id: int,
+        link: LinkInput,
+        node_id: UUID,
+        address: ipaddress.IPv4Address,
+        used_macs: set[str],
+        next_nic_index: dict[UUID, int],
+    ) -> PortAllocation:
+        mac = self._mac(slice_id, link.link_id, node_id)
+        if mac in used_macs:
+            raise NetworkAllocationError("NET_MAC_COLLISION", "MAC collision detected")
+        used_macs.add(mac)
+
+        nic_index = next_nic_index.get(node_id, 0) + 1
+        next_nic_index[node_id] = nic_index
+
+        return PortAllocation(
+            port_id=UUID(int=(link.link_id.int ^ node_id.int)),
+            link_id=link.link_id,
+            node_id=node_id,
+            public=False,
+            ip=address,
+            mac=mac,
+            nic_index=nic_index,
+        )
 
     def _allocate_public_ips(
         self,

@@ -41,8 +41,8 @@ def assign_display(
     node_id: str,
     server_id: int,
     display: int,
-) -> None:
-    conn.execute(
+) -> int:
+    result = conn.execute(
         """
         UPDATE slices.slice_nodo
            SET server_id = %s, vnc_display = %s
@@ -51,6 +51,7 @@ def assign_display(
         """,
         (server_id, display, node_id),
     )
+    return result.rowcount
 
 
 def rollback_pending(conn: Any, deployment_id: int) -> int:
@@ -59,7 +60,7 @@ def rollback_pending(conn: Any, deployment_id: int) -> int:
         UPDATE slices.slice_nodo
            SET server_id = NULL, vnc_display = NULL
          WHERE deployment_id = %s
-           AND estado_nodo = 'PENDING'
+           AND estado_nodo IN ('PENDING', 'FAILED')
         """,
         (deployment_id,),
     )

@@ -343,12 +343,16 @@ def _resize_class(action: Action) -> Reversibility:
     before = action.params.get(RESIZE_BEFORE_KEY)
     after = action.params.get(RESIZE_AFTER_KEY)
     if not isinstance(before, Mapping) or not isinstance(after, Mapping):
-        return Reversibility.I
+        raise InvalidSpecError("RESIZE_VM requires before and after flavors")
     before_disk = before.get("disk_mb")
     after_disk = after.get("disk_mb")
-    if before_disk is None or after_disk is None or before_disk != after_disk:
-        return Reversibility.I
-    return Reversibility.R
+    if before_disk is None or after_disk is None:
+        raise InvalidSpecError("RESIZE_VM flavors must define disk_mb")
+    if after_disk < before_disk:
+        raise InvalidSpecError(
+            f"DISK_SHRINK: el disco no se puede reducir ({before_disk} MB → {after_disk} MB)"
+        )
+    return Reversibility.I if after_disk > before_disk else Reversibility.R
 
 
 def action_class(action: Action) -> Reversibility:

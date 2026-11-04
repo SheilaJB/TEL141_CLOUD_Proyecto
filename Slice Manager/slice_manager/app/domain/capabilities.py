@@ -3,6 +3,8 @@ from typing import Any
 
 import yaml
 
+from slice_manager.app.planning.common import AdapterCapabilities
+
 
 def load_capabilities(directory: Path | None, cluster_name: str) -> dict[str, bool]:
     if directory is None:
@@ -21,3 +23,9 @@ def load_capabilities(directory: Path | None, cluster_name: str) -> dict[str, bo
     ):
         raise ValueError(f"capabilities file {path} must define boolean supports flags")
     return supports
+
+
+def load_adapter_capabilities(
+    directory: Path | None, cluster_name: str
+) -> AdapterCapabilities:
+    return AdapterCapabilities.from_supports(load_capabilities(directory, cluster_name))

@@ -209,6 +209,108 @@ def attach_port_action(
     )
 
 
+def _flavor_params(flavor: CatalogFlavor) -> dict[str, object]:
+    return {
+        "name": flavor.name,
+        "vcpu": flavor.vcpu,
+        "ram_mb": flavor.ram_mb,
+        "disk_mb": flavor.disk_mb,
+    }
+
+
+def _vm_op_action(
+    op: ActionOp,
+    *,
+    action_id: str,
+    intent_id: str,
+    node_id: UUID,
+    params: dict[str, object] | None = None,
+    after: dict[str, object] | None = None,
+) -> Action:
+    return Action(
+        id=action_id,
+        op=op,
+        executor=Executor.ADAPTER,
+        intent_id=intent_id,
+        target=ActionTarget(kind=TargetKind.VM, id=node_id),
+        params=params or {},
+        after=after,
+    )
+
+
+def stop_vm_action(*, action_id: str, intent_id: str, node_id: UUID) -> Action:
+    return _vm_op_action(
+        ActionOp.STOP_VM, action_id=action_id, intent_id=intent_id, node_id=node_id
+    )
+
+
+def start_vm_action(*, action_id: str, intent_id: str, node_id: UUID) -> Action:
+    return _vm_op_action(
+        ActionOp.START_VM, action_id=action_id, intent_id=intent_id, node_id=node_id
+    )
+
+
+def delete_vm_action(*, action_id: str, intent_id: str, node_id: UUID) -> Action:
+    return _vm_op_action(
+        ActionOp.DELETE_VM, action_id=action_id, intent_id=intent_id, node_id=node_id
+    )
+
+
+def resize_vm_action(
+    *,
+    action_id: str,
+    intent_id: str,
+    node_id: UUID,
+    before_flavor: CatalogFlavor,
+    flavor: CatalogFlavor,
+) -> Action:
+    return _vm_op_action(
+        ActionOp.RESIZE_VM,
+        action_id=action_id,
+        intent_id=intent_id,
+        node_id=node_id,
+        params={
+            RESIZE_BEFORE_KEY: _flavor_params(before_flavor),
+            RESIZE_AFTER_KEY: _flavor_params(flavor),
+        },
+        after={"flavor_ref": flavor.name},
+    )
+
+
+def detach_port_action(
+    *,
+    action_id: str,
+    intent_id: str,
+    port_id: UUID,
+    link_id: UUID,
+    node_id: UUID,
+) -> Action:
+    return Action(
+        id=action_id,
+        op=ActionOp.DETACH_PORT,
+        executor=Executor.ADAPTER,
+        intent_id=intent_id,
+        target=ActionTarget(
+            kind=TargetKind.PORT,
+            id=port_id,
+            link_id=link_id,
+            node_id=node_id,
+        ),
+        params={},
+    )
+
+
+def delete_link_action(*, action_id: str, intent_id: str, link_id: UUID) -> Action:
+    return Action(
+        id=action_id,
+        op=ActionOp.DELETE_LINK,
+        executor=Executor.ADAPTER,
+        intent_id=intent_id,
+        target=ActionTarget(kind=TargetKind.LINK, id=link_id),
+        params={},
+    )
+
+
 # Reserva
 def calculate_reservation_plan(
     intents: list[Intent],
@@ -264,6 +366,9 @@ def calculate_reservation_plan(
                 )
             release.append(ReservationRelease(node_id=intent.target.id))
         elif intent.kind in {IntentKind.MODIFY, IntentKind.RECREATE}:
+            # P47: sin cambio de flavor_ref no hay resize ni se exigen before/after.
+            if flavor_change is None or flavor_change.before == flavor_change.after:
+                continue
             if before is None or after is None:
                 raise InvalidSpecError(
                     f"{intent.kind.value.lower()} intent {intent.id!r} must define before and after flavors",
@@ -331,28 +436,56 @@ _DESTRUCTIVE_OPS = frozenset(
 
 _DISRUPTION_ORDER = {Disruption.N0: 0, Disruption.N1: 1, Disruption.N2: 2}
 
-# Claves de params que define el constructor de RESIZE_VM (aún no existe): ambas con la forma
-# {"vcpu", "ram_mb", "disk_mb", ...} del flavor en CREATE_VM. "before_flavor" es el flavor actual
+# Claves de params de RESIZE_VM (ver resize_vm_action): ambas con la forma
+# {"name", "vcpu", "ram_mb", "disk_mb"}. "before_flavor" es el flavor actual
 # y "flavor" el deseado.
 RESIZE_BEFORE_KEY = "before_flavor"
 RESIZE_AFTER_KEY = "flavor"
 
 
+def validate_resize(
+    before_flavor: Mapping[str, object],
+    after_flavor: Mapping[str, object],
+    *,
+    path: str = "$",
+) -> None:
+    """P14/P40: el disco solo puede crecer."""
+    before_disk = before_flavor.get("disk_mb")
+    after_disk = after_flavor.get("disk_mb")
+    if before_disk is None or after_disk is None:
+        raise InvalidSpecError("RESIZE_VM flavors must define disk_mb", path=path)
+    if after_disk < before_disk:
+        raise InvalidSpecError(
+            f"DISK_SHRINK: el disco no se puede reducir ({before_disk} MB → {after_disk} MB)",
+            path=path,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AdapterCapabilities:
+    """P41/P43/P45: mismas claves que `supports` en capabilities/<cluster>.yaml."""
+
+    hot_resize: bool = False
+    hot_attach_port: bool = False
+    hot_detach_port: bool = False
+
+    @classmethod
+    def from_supports(cls, supports: Mapping[str, bool]) -> "AdapterCapabilities":
+        return cls(
+            hot_resize=bool(supports.get("hot_resize", False)),
+            hot_attach_port=bool(supports.get("hot_attach_port", False)),
+            hot_detach_port=bool(supports.get("hot_detach_port", False)),
+        )
+
+
 def _resize_class(action: Action) -> Reversibility:
-    """P35: R si solo cambian vCPU o RAM; I si crece el disco o faltan datos para decidirlo."""
+    """P35: R si el disco no cambia; I si crece. Reducir o faltar datos es error (defensa)."""
     before = action.params.get(RESIZE_BEFORE_KEY)
     after = action.params.get(RESIZE_AFTER_KEY)
     if not isinstance(before, Mapping) or not isinstance(after, Mapping):
         raise InvalidSpecError("RESIZE_VM requires before and after flavors")
-    before_disk = before.get("disk_mb")
-    after_disk = after.get("disk_mb")
-    if before_disk is None or after_disk is None:
-        raise InvalidSpecError("RESIZE_VM flavors must define disk_mb")
-    if after_disk < before_disk:
-        raise InvalidSpecError(
-            f"DISK_SHRINK: el disco no se puede reducir ({before_disk} MB → {after_disk} MB)"
-        )
-    return Reversibility.I if after_disk > before_disk else Reversibility.R
+    validate_resize(before, after)
+    return Reversibility.I if after["disk_mb"] > before["disk_mb"] else Reversibility.R
 
 
 def action_class(action: Action) -> Reversibility:

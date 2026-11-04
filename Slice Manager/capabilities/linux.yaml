@@ -3,7 +3,7 @@ supports:
   set_public_access: true        # NAT / port-forward
   apply_security_rules: false    # [OPEN] R5
 
-  # --- Update / Power (placeholder) ---
+  # --- Update (P45) ---
   hot_resize: false
   stop_start: false
   hot_attach_port: false

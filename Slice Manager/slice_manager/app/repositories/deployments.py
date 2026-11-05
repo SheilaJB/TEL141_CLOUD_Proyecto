@@ -5,7 +5,7 @@ from uuid import UUID
 
 import asyncpg
 
-from contracts.plan import ActionOp, DeploymentPlan
+from contracts.plan import ActionOp, DeploymentPlan, IntentKind
 
 from contracts.registry import (
     ActionFact,
@@ -293,12 +293,15 @@ class DeploymentRepository:
         requester_id: int,
         plan: DeploymentPlan,
         reason: str,
+        deployment_type: str = "DEPLOY",
+        origin_version_id: int | None = None,
     ) -> int:
         await connection.execute(
             """
             INSERT INTO slices.deployment
-                (id, slice_id, target_version_id, tipo, estado, plan, error, solicitado_por)
-            VALUES ($1, $2, $3, 'DEPLOY', 'REJECTED', $4::jsonb, $5::jsonb, $6)
+                (id, slice_id, origin_version_id, target_version_id, tipo, estado, plan,
+                 error, solicitado_por)
+            VALUES ($1, $2, $7, $3, $8, 'REJECTED', $4::jsonb, $5::jsonb, $6)
             """,
             deployment_id,
             slice_id,
@@ -306,6 +309,8 @@ class DeploymentRepository:
             plan.model_dump_json(),
             json.dumps({"code": "AdmissionRejected", "message": reason}),
             requester_id,
+            origin_version_id,
+            deployment_type,
         )
         await connection.execute(
             """
@@ -469,6 +474,179 @@ class DeploymentRepository:
                 link_id,
                 node_id,
                 is_public,
+                version_id,
+                deployment_id,
+            )
+
+    async def get_update_origin(
+        self, connection: asyncpg.Connection, slice_id: int
+    ) -> asyncpg.Record | None:
+        return await connection.fetchrow(
+            """
+            SELECT s.version_activa_id, av.estado_version AS origin_state,
+                   EXISTS (
+                       SELECT 1 FROM slices.slice_version iv
+                       WHERE iv.slice_id = s.id AND iv.estado_version = 'INCONSISTENT'
+                   ) AS has_inconsistent
+            FROM slices.slice AS s
+            LEFT JOIN slices.slice_version AS av ON av.id = s.version_activa_id
+            WHERE s.id = $1
+            """,
+            slice_id,
+        )
+
+    async def create_update_deployment(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        deployment_id: int,
+        slice_id: int,
+        origin_version_id: int,
+        target_version_id: int,
+        requester_id: int,
+        plan: DeploymentPlan,
+        requires_approval: bool,
+    ) -> str:
+        await connection.execute(
+            """
+            INSERT INTO slices.deployment
+                (id, slice_id, origin_version_id, target_version_id, tipo, estado, plan,
+                 solicitado_por)
+            VALUES ($1, $2, $3, $4, 'UPDATE', 'PENDING', $5::jsonb, $6)
+            """,
+            deployment_id,
+            slice_id,
+            origin_version_id,
+            target_version_id,
+            plan.model_dump_json(),
+            requester_id,
+        )
+        workflow_id = f"deployment-{deployment_id}"
+        await connection.execute(
+            "UPDATE slices.deployment SET workflow_id = $2 WHERE id = $1",
+            deployment_id,
+            workflow_id,
+        )
+        await connection.execute(
+            """
+            INSERT INTO slices.solicitud_aprobacion (deployment_id, usuario_id, estado)
+            VALUES ($1, $2, $3)
+            """,
+            deployment_id,
+            requester_id,
+            "PENDING" if requires_approval else "APPROVED",
+        )
+        await connection.execute(
+            """
+            UPDATE slices.slice
+            SET estado = 'UPDATING', fecha_modificacion = now()
+            WHERE id = $1
+            """,
+            slice_id,
+        )
+        await connection.execute(
+            "UPDATE slices.slice_version SET estado_version = $2 WHERE id = $1",
+            target_version_id,
+            "APPROVAL_PENDING" if requires_approval else "DEPLOYING",
+        )
+        await self._insert_update_inventory(
+            connection,
+            slice_id=slice_id,
+            version_id=target_version_id,
+            deployment_id=deployment_id,
+            plan=plan,
+        )
+        return workflow_id
+
+    async def _insert_update_inventory(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        slice_id: int,
+        version_id: int,
+        deployment_id: int,
+        plan: DeploymentPlan,
+    ) -> None:
+        # Filas PENDING de nodos, enlaces y puertos nuevos (P52). Los IDs vienen del plan
+        # (PlanIdentityFactory); los nodos recreados y los enlaces existentes ya tienen fila.
+        actions = [item for round_actions in plan.rounds for item in round_actions]
+        vm_ids = [a.target.id for a in actions if a.op == ActionOp.CREATE_VM]
+        existing_nodes: set[UUID] = set()
+        if vm_ids:
+            rows = await connection.fetch(
+                "SELECT id FROM slices.slice_nodo WHERE id = ANY($1::uuid[])", vm_ids
+            )
+            existing_nodes = {row["id"] for row in rows}
+        for action in actions:
+            if action.op == ActionOp.CREATE_VM:
+                if action.target.id in existing_nodes:
+                    continue
+                vm = action.after
+                if not isinstance(vm, dict):
+                    raise ValueError(f"CREATE_VM action {action.id} has no VM specification")
+                flavor_id = await connection.fetchval(
+                    "SELECT id FROM slices.flavor WHERE name = $1 AND activo", vm["flavor_ref"]
+                )
+                image_id = await connection.fetchval(
+                    "SELECT id FROM slices.image WHERE nombre = $1 AND estado = 'ACTIVE'",
+                    vm["image_ref"],
+                )
+                if flavor_id is None or image_id is None:
+                    raise ValueError("planned VM references a catalog item that is no longer available")
+                await connection.execute(
+                    """
+                    INSERT INTO slices.slice_nodo
+                        (id, slice_id, name, defin_version_id, flavor_id, imagen_id,
+                         public_access, estado_nodo, deployment_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    action.target.id,
+                    slice_id,
+                    vm["name"],
+                    version_id,
+                    flavor_id,
+                    image_id,
+                    bool(vm.get("public", False)),
+                    deployment_id,
+                )
+            elif action.op == ActionOp.CREATE_LINK:
+                link = action.after
+                if not isinstance(link, dict):
+                    raise ValueError(f"CREATE_LINK action {action.id} has no link specification")
+                await connection.execute(
+                    """
+                    INSERT INTO slices.slice_enlace
+                        (id, slice_id, name, public, defin_version_id, deployment_id)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    action.target.id,
+                    slice_id,
+                    link["name"],
+                    bool(link.get("public", False)),
+                    version_id,
+                    deployment_id,
+                )
+        # Los puertos van al final: sus enlaces nuevos ya existen.
+        for action in actions:
+            if action.op != ActionOp.ATTACH_PORT:
+                continue
+            if action.target.link_id is None or action.target.node_id is None:
+                raise ValueError(f"ATTACH_PORT action {action.id} has an incomplete target")
+            await connection.execute(
+                """
+                INSERT INTO slices.slice_enlace_puerto
+                    (id, enlace_id, nodo_id, public, defin_version_id, deployment_id)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (id) DO NOTHING
+                """,
+                action.target.id,
+                action.target.link_id,
+                action.target.node_id,
+                bool(action.after.get("public", False))
+                if isinstance(action.after, dict)
+                else False,
                 version_id,
                 deployment_id,
             )
@@ -701,6 +879,148 @@ class DeploymentRepository:
             slice_id,
         )
 
+    async def commit_update(
+        self,
+        connection: asyncpg.Connection,
+        deployment_id: int,
+        *,
+        removed_node_ids: list[UUID],
+        updated_node_ids: list[UUID],
+        detached_port_ids: list[UUID],
+        complete: bool,
+    ) -> None:
+        # Única escritura de DELETED de nodos y enlaces en Update (P48 d, P53). Los puertos
+        # los marca el fact de DETACH_PORT; aquí solo se verifica. Idempotente.
+        row = await connection.fetchrow(
+            """
+            SELECT d.tipo, d.estado, d.slice_id, d.plan, d.target_version_id
+            FROM slices.deployment d
+            JOIN slices.slice s ON s.id = d.slice_id
+            WHERE d.id = $1
+            FOR UPDATE OF d, s
+            """,
+            deployment_id,
+        )
+        if row is None:
+            raise LookupError(f"deployment {deployment_id} was not found")
+        if row["tipo"] != "UPDATE":
+            raise ValueError("update commit only applies to UPDATE deployments")
+        if row["estado"] != "IN_PROGRESS":
+            raise ValueError("update commit requires an in-progress deployment")
+        slice_id = row["slice_id"]
+        plan = DeploymentPlan.model_validate_json(row["plan"])
+
+        removed_in_plan = {
+            intent.target.id
+            for intent in plan.intents
+            if intent.target.table == "vms" and intent.kind == IntentKind.REMOVE
+        }
+        if not set(removed_node_ids) <= removed_in_plan:
+            raise ValueError("update commit removes a node that is not a REMOVE intent of the plan")
+        updated_changes: dict[UUID, dict[str, object]] = {}
+        for intent in plan.intents:
+            if intent.target.table != "vms" or intent.kind not in {
+                IntentKind.RECREATE,
+                IntentKind.MODIFY,
+            }:
+                continue
+            updated_changes[intent.target.id] = {
+                change.field: change.after for change in intent.changes
+            }
+        if not set(updated_node_ids) <= set(updated_changes):
+            raise ValueError("update commit updates a node that is not a MODIFY or RECREATE intent")
+
+        owned_ids = set(removed_node_ids) | set(updated_node_ids)
+        if owned_ids:
+            owned = await connection.fetchval(
+                """
+                SELECT count(*) FROM slices.slice_nodo
+                WHERE slice_id = $1 AND id = ANY($2::uuid[])
+                """,
+                slice_id,
+                list(owned_ids),
+            )
+            if owned != len(owned_ids):
+                raise ValueError("update commit nodes do not match deployment slice")
+
+        # Un nodo recreado no está en removed_node_ids: no se marca DELETED.
+        if removed_node_ids:
+            await connection.execute(
+                """
+                UPDATE slices.slice_nodo SET estado_nodo = 'DELETED'
+                WHERE slice_id = $1 AND id = ANY($2::uuid[]) AND estado_nodo <> 'DELETED'
+                """,
+                slice_id,
+                removed_node_ids,
+            )
+
+        for node_id in updated_node_ids:
+            changes = updated_changes[node_id]
+            if "flavor_ref" in changes:
+                flavor_id = await connection.fetchval(
+                    "SELECT id FROM slices.flavor WHERE name = $1", changes["flavor_ref"]
+                )
+                if flavor_id is None:
+                    raise ValueError(f"flavor {changes['flavor_ref']!r} was not found")
+                await connection.execute(
+                    "UPDATE slices.slice_nodo SET flavor_id = $3 WHERE id = $1 AND slice_id = $2",
+                    node_id,
+                    slice_id,
+                    flavor_id,
+                )
+            if "image_ref" in changes:
+                image_id = await connection.fetchval(
+                    "SELECT id FROM slices.image WHERE nombre = $1", changes["image_ref"]
+                )
+                if image_id is None:
+                    raise ValueError(f"image {changes['image_ref']!r} was not found")
+                await connection.execute(
+                    "UPDATE slices.slice_nodo SET imagen_id = $3 WHERE id = $1 AND slice_id = $2",
+                    node_id,
+                    slice_id,
+                    image_id,
+                )
+            if "public" in changes:
+                await connection.execute(
+                    "UPDATE slices.slice_nodo SET public_access = $3 WHERE id = $1 AND slice_id = $2",
+                    node_id,
+                    slice_id,
+                    bool(changes["public"]),
+                )
+
+        plan_detaches = {
+            action.target.id
+            for round_actions in plan.rounds
+            for action in round_actions
+            if action.op == ActionOp.DETACH_PORT
+        }
+        expected_detaches = plan_detaches if complete else set(detached_port_ids)
+        if not set(detached_port_ids) <= plan_detaches:
+            raise ValueError("update commit reports a detached port that is not in the plan")
+        if expected_detaches:
+            pending = await connection.fetchval(
+                """
+                SELECT count(*) FROM slices.slice_enlace_puerto
+                WHERE id = ANY($1::uuid[]) AND estado <> 'DELETED'
+                """,
+                list(expected_detaches),
+            )
+            if pending:
+                raise ValueError("update commit found ports with DETACH_PORT that are not DELETED")
+
+        await connection.execute(
+            """
+            UPDATE slices.slice_enlace AS e
+            SET estado = 'DELETED'
+            WHERE e.slice_id = $1 AND e.estado <> 'DELETED'
+              AND NOT EXISTS (
+                  SELECT 1 FROM slices.slice_enlace_puerto AS p
+                  WHERE p.enlace_id = e.id AND p.estado <> 'DELETED'
+              )
+            """,
+            slice_id,
+        )
+
     async def get_approval_state(
         self, connection: asyncpg.Connection, deployment_id: int
     ) -> asyncpg.Record | None:
@@ -755,7 +1075,7 @@ class DeploymentRepository:
         self, connection: asyncpg.Connection, deployment_id: int, facts: RoundFacts
     ) -> RoundFactsResult:
         deployment = await connection.fetchrow(
-            "SELECT slice_id FROM slices.deployment WHERE id = $1 FOR UPDATE",
+            "SELECT slice_id, tipo FROM slices.deployment WHERE id = $1 FOR UPDATE",
             deployment_id,
         )
         if deployment is None:
@@ -767,6 +1087,7 @@ class DeploymentRepository:
                 connection,
                 slice_id=deployment["slice_id"],
                 result=result,
+                deployment_type=deployment["tipo"],
             )
             persisted_count += int(persisted)
             unsupported = sorted(set(result.facts) - _SUPPORTED_ACTION_FACTS.get(result.op, frozenset()))
@@ -787,6 +1108,7 @@ class DeploymentRepository:
         *,
         slice_id: int,
         result: ActionFact,
+        deployment_type: str | None = None,
     ) -> bool:
         if result.op == ActionOp.CREATE_VM:
             pid = result.facts.get("pid")
@@ -806,6 +1128,9 @@ class DeploymentRepository:
                 raise LookupError(f"node {result.target_id} was not found for action facts")
             return True
         elif result.op == ActionOp.DELETE_VM:
+            if deployment_type == "UPDATE":
+                # P48 d: en Update, CREATE_VM o commit_update fijan el estado del nodo.
+                return False
             status = await connection.execute(
                 """
                 UPDATE slices.slice_nodo SET estado_nodo = 'DELETED'

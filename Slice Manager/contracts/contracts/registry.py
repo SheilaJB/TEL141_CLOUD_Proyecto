@@ -70,6 +70,13 @@ class CommitDestroy(ContractModel):
     complete: bool
 
 
+class CommitUpdate(ContractModel):
+    removed_node_ids: list[UUID] = Field(default_factory=list)  # DELETE_VM exitoso sobre intents REMOVE
+    updated_node_ids: list[UUID] = Field(default_factory=list)  # CREATE_VM o RESIZE_VM exitoso
+    detached_port_ids: list[UUID] = Field(default_factory=list)  # DETACH_PORT exitoso
+    complete: bool
+
+
 class FinishDeployment(ContractModel):
     event_id: str
     outcome: DeploymentOutcome

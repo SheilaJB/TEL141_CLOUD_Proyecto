@@ -30,6 +30,7 @@ class CatalogFlavor:
     ram_mb: int
     disk_mb: int
     catalog_id: int
+    active: bool = True
 
     def resources(self) -> ResourceVector:
         return ResourceVector(vcpu=self.vcpu, ram_mb=self.ram_mb, disk_mb=self.disk_mb)
@@ -42,6 +43,33 @@ class CatalogImage:
     disk_size: int
     catalog_id: int
     cluster_compatible: str | None
+    active: bool = True
+
+
+def resolve_flavor(
+    name: str,
+    flavors: Mapping[str, CatalogFlavor],
+    *,
+    path: str,
+    require_active: bool,
+) -> CatalogFlavor:
+    flavor = flavors.get(name)
+    if flavor is None or flavor.name != name or (require_active and not flavor.active):
+        raise InvalidSpecError(f"unknown or inactive flavor {name!r}", path=path)
+    return flavor
+
+
+def resolve_image(
+    name: str,
+    images: Mapping[str, CatalogImage],
+    *,
+    path: str,
+    require_active: bool,
+) -> CatalogImage:
+    image = images.get(name)
+    if image is None or image.name != name or (require_active and not image.active):
+        raise InvalidSpecError(f"unknown or inactive image {name!r}", path=path)
+    return image
 
 
 def resolve_vm_catalog(
@@ -51,13 +79,15 @@ def resolve_vm_catalog(
     images: Mapping[str, CatalogImage],
     cluster_name: str,
     supports_public_access: bool,
+    require_active_flavor: bool = True,
+    require_active_image: bool = True,
 ) -> tuple[CatalogFlavor, CatalogImage]:
-    flavor = flavors.get(vm.flavor)
-    if flavor is None or flavor.name != vm.flavor:
-        raise InvalidSpecError(f"unknown or inactive flavor {vm.flavor!r}", path=f"vms[{vm.name}].flavor")
-    image = images.get(vm.image)
-    if image is None or image.name != vm.image:
-        raise InvalidSpecError(f"unknown or inactive image {vm.image!r}", path=f"vms[{vm.name}].image")
+    flavor = resolve_flavor(
+        vm.flavor, flavors, path=f"vms[{vm.name}].flavor", require_active=require_active_flavor
+    )
+    image = resolve_image(
+        vm.image, images, path=f"vms[{vm.name}].image", require_active=require_active_image
+    )
     if not image.reference.strip():
         raise InvalidSpecError(
             f"image {image.name!r} has no infrastructure reference",

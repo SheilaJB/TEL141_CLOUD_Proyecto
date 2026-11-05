@@ -77,8 +77,9 @@ COMPENSATION_RETRY_POLICY = RetryPolicy(
 
 
 class DeploymentStepFailed(Exception):
-    def __init__(self, error: ErrorResponse) -> None:
+    def __init__(self, error: ErrorResponse, *, compensable: bool = True) -> None:
         self.error = error
+        self.compensable = compensable
         super().__init__(error.message)
 
 
@@ -98,6 +99,7 @@ class WorkflowHelpers:
         record_facts: bool = False,
         on_round_success: Callable[[list[Action]], None] | None = None,
         progress: RoundsProgress | None = None,
+        compensable: bool = True,
     ) -> None:
         for round_num, actions in enumerate(rounds, start=1):
             results = await asyncio.gather(
@@ -155,7 +157,7 @@ class WorkflowHelpers:
                 and round_num >= point_of_no_return):
                 progress.reversibility_reached = True
             if failures:
-                raise DeploymentStepFailed(failures[0])
+                raise DeploymentStepFailed(failures[0], compensable=compensable)
 
     async def _finish(
         self,

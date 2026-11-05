@@ -26,6 +26,7 @@ from slice_manager.app.planning.common import (
     detach_port_action,
     order_rounds,
     resize_vm_action,
+    resolve_flavor,
     resolve_vm_catalog,
     summarize,
     validate_definition,
@@ -126,12 +127,9 @@ def existing_ids_from_state(current: CurrentState) -> dict[tuple[EntityType, tup
 
 # Validaciones (P14, P40, D5)
 def _catalog_flavor(
-    flavors: Mapping[str, CatalogFlavor], name: str, path: str
+    flavors: Mapping[str, CatalogFlavor], name: str, path: str, *, require_active: bool = False
 ) -> CatalogFlavor:
-    flavor = flavors.get(name)
-    if flavor is None or flavor.name != name:
-        raise InvalidSpecError(f"unknown or inactive flavor {name!r}", path=path)
-    return flavor
+    return resolve_flavor(name, flavors, path=path, require_active=require_active)
 
 
 def validate_update_resizes(inputs: UpdateInputs) -> None:
@@ -143,7 +141,7 @@ def validate_update_resizes(inputs: UpdateInputs) -> None:
             continue
         path = f"vms[{vm.name}].flavor"
         before = _catalog_flavor(inputs.flavors, existing.flavor, path)
-        after = _catalog_flavor(inputs.flavors, vm.flavor, path)
+        after = _catalog_flavor(inputs.flavors, vm.flavor, path, require_active=True)
         validate_resize(
             {"disk_mb": before.disk_mb}, {"disk_mb": after.disk_mb}, path=path
         )
@@ -253,13 +251,17 @@ def build_update_plan(inputs: UpdateInputs) -> DeploymentPlan:
     validate_definition(desired)
 
     resolved: dict[str, tuple[CatalogFlavor, CatalogImage]] = {}
+    current_by_name = {vm.name: vm for vm in inputs.current.vms}
     for vm in sorted(desired.vms, key=lambda item: item.name):
+        current_vm = current_by_name.get(vm.name)
         resolved[vm.name] = resolve_vm_catalog(
             vm,
             flavors=inputs.flavors,
             images=inputs.images,
             cluster_name=inputs.cluster_name,
             supports_public_access=inputs.supports_public_access,
+            require_active_flavor=current_vm is None or vm.flavor != current_vm.flavor,
+            require_active_image=current_vm is None or vm.image != current_vm.image,
         )
     validate_update_resizes(inputs)
     validate_update_links(inputs)
@@ -306,7 +308,6 @@ def build_update_plan(inputs: UpdateInputs) -> DeploymentPlan:
     create_vm_ids: dict[str, str] = {}
     delete_vm_ids: dict[str, str] = {}
     recreated: set[str] = set()
-    removed_vm_detaches: dict[str, set[str]] = {name: set() for name in removed_vm_names}
     vm_attach_ids: dict[str, set[str]] = {}
 
     # VMs nuevas, redimensionadas y recreadas
@@ -421,7 +422,7 @@ def build_update_plan(inputs: UpdateInputs) -> DeploymentPlan:
                 )
             )
 
-    # VMs eliminadas: el DELETE_VM espera a sus DETACH_PORT
+    # VMs eliminadas: el DELETE_VM no depende de nada; sus DETACH_PORT lo esperan
     for name in removed_vm_names:
         existing = current_vms[name]
         intent_id = builder.intent(
@@ -535,10 +536,6 @@ def build_update_plan(inputs: UpdateInputs) -> DeploymentPlan:
 
         link_removal_deps: set[str] = set()
         for vm_name in removed_eps:
-            if vm_name in recreated:
-                # La VM recreada no conserva el puerto: lo retira DELETE_VM, no un DETACH_PORT.
-                link_removal_deps.add(delete_vm_ids[vm_name])
-                continue
             detach_id = builder.action_id()
             builder.add(
                 detach_port_action(
@@ -547,11 +544,10 @@ def build_update_plan(inputs: UpdateInputs) -> DeploymentPlan:
                     port_id=current_ports[(label, vm_name)].port_id,
                     link_id=link_id,
                     node_id=node_ids[vm_name],
-                )
+                ),
+                after={delete_vm_ids[vm_name]} if vm_name in delete_vm_ids else None,
             )
             link_removal_deps.add(detach_id)
-            if vm_name in removed_vm_detaches:
-                removed_vm_detaches[vm_name].add(detach_id)
         if kind == IntentKind.REMOVE:
             builder.add(
                 delete_link_action(
@@ -564,8 +560,6 @@ def build_update_plan(inputs: UpdateInputs) -> DeploymentPlan:
 
     for vm_name, create_id in create_vm_ids.items():
         builder.depend(create_id, *vm_attach_ids.get(vm_name, ()))
-    for vm_name, detaches in removed_vm_detaches.items():
-        builder.depend(delete_vm_ids[vm_name], *detaches)
 
     intents = builder.build_intents()
     ordered_rounds, point_of_no_return = order_rounds(builder.actions, builder.dependencies)

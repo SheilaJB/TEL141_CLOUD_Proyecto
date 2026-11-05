@@ -312,7 +312,8 @@ class DeployWorkflow(WorkflowHelpers):
                 if isinstance(exc, DeploymentStepFailed)
                 else self._error_from_exception(exc)
             )
-            if inventory_committed or progress.reversibility_reached:
+            not_compensable = isinstance(exc, DeploymentStepFailed) and not exc.compensable
+            if inventory_committed or progress.reversibility_reached or not_compensable:
                 await self._finish(
                     deployment_id,
                     DeploymentOutcome.FAILED,

@@ -1,6 +1,6 @@
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Protocol
 
 import asyncpg
@@ -10,6 +10,7 @@ from contracts.registry import (
     ApprovalState,
     ApprovalStatus,
     CommitDestroy,
+    CommitUpdate,
     DeploymentContext,
     DeploymentCreated,
     FinishDeployment,
@@ -27,7 +28,7 @@ from slice_manager.app.domain.errors import (
     WorkflowUnavailableError,
     WorkflowStartError,
 )
-from contracts.plan import DeploymentPlan
+from contracts.plan import DeploymentPlan, PlanType
 from slice_manager.app.planning import (
     InvalidSpecError,
     build_destroy_plan,
@@ -248,6 +249,116 @@ class SliceService:
                     f"could not start Temporal workflow {workflow_id}"
                 ) from exc
         return created
+
+    async def request_update(
+        self,
+        *,
+        slice_id: int,
+        version_number: int,
+        requester_id: int,
+        plan_factory: Callable[
+            [asyncpg.Connection, asyncpg.Record, int], Awaitable[DeploymentPlan]
+        ],
+    ) -> DeploymentCreated:
+        """Crea el deployment UPDATE y sus filas PENDING (P52). No arranca workflow (paso 8).
+
+        `plan_factory(connection, context, deployment_id)` construye el plan con el scope
+        `deployment:{id}` y los IDs existentes (P42); aún no hay loader de la IR actual.
+        """
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                await self._repository.lock_slice_owner(connection, slice_id)
+                context = await self._repository.lock_initial_deploy_context(
+                    connection,
+                    slice_id=slice_id,
+                    version_number=version_number,
+                )
+                if context is None:
+                    raise ResourceNotFoundError("slice or draft version was not found")
+                if context["usuario_id"] != requester_id:
+                    raise AccessDeniedError("only the slice owner can update this slice")
+                if context["estado_version"] != "DRAFT":
+                    raise ConflictError("the target slice version is not editable")
+                if await self._repository.get_active_deployment(connection, slice_id):
+                    raise ConflictError("another deployment is already active for this slice")
+
+                origin = await self._repository.get_update_origin(connection, slice_id)
+                if origin is None:
+                    raise ResourceNotFoundError("slice was not found")
+                # P38: ninguna versión INCONSISTENT permite Update (un Deploy fallido deja
+                # version_activa_id en NULL, por eso se mira la tabla de versiones).
+                if origin["has_inconsistent"] or origin["origin_state"] == "INCONSISTENT":
+                    raise ConflictError("Update is blocked while the slice has an INCONSISTENT version")
+                if origin["version_activa_id"] is None or origin["origin_state"] != "ACTIVE":
+                    raise ConflictError("Update requires an ACTIVE origin version")
+                if origin["version_activa_id"] == context["version_id"]:
+                    raise ConflictError("the target version is already the active version")
+
+                if context["zone_state"] != "ACTIVE":
+                    raise InvalidSpecError("availability zone is not active")
+                if context["nivel_id"] is None or context["service_level"] is None:
+                    raise AccessDeniedError("the slice owner has no service level")
+                if context["service_level"] not in {"basico", "avanzado"}:
+                    raise ConflictError(
+                        f"unsupported service level {context['service_level']!r}"
+                    )
+                if not await self._repository.is_zone_allowed(
+                    connection,
+                    zone_id=context["zona_id"],
+                    service_level_id=context["nivel_id"],
+                ):
+                    raise InvalidSpecError(
+                        "the user's service level is not allowed in this availability zone"
+                    )
+
+                deployment_id = await self._repository.reserve_deployment_id(connection)
+                plan = await plan_factory(connection, context, deployment_id)
+                if plan.type != PlanType.UPDATE:
+                    raise ConflictError("the plan is not an UPDATE plan")
+                rejection_reason = await self._repository.admission_failure(
+                    connection,
+                    user_id=requester_id,
+                    service_level_id=context["nivel_id"],
+                    zone_id=context["zona_id"],
+                    resource_delta=plan.summary.resource_delta.model_dump(),
+                )
+                if rejection_reason is not None:
+                    await self._repository.create_rejected_deployment(
+                        connection,
+                        deployment_id=deployment_id,
+                        slice_id=slice_id,
+                        version_id=context["version_id"],
+                        requester_id=requester_id,
+                        plan=plan,
+                        reason=rejection_reason,
+                        deployment_type="UPDATE",
+                        origin_version_id=origin["version_activa_id"],
+                    )
+                    return DeploymentCreated(
+                        deployment_id=deployment_id,
+                        state="REJECTED",
+                        approval_status=ApprovalStatus.REJECTED_BY_SYSTEM,
+                        rejection_reason=rejection_reason,
+                    )
+                requires_approval = context["service_level"] == "basico"
+                workflow_id = await self._repository.create_update_deployment(
+                    connection,
+                    deployment_id=deployment_id,
+                    slice_id=slice_id,
+                    origin_version_id=origin["version_activa_id"],
+                    target_version_id=context["version_id"],
+                    requester_id=requester_id,
+                    plan=plan,
+                    requires_approval=requires_approval,
+                )
+                return DeploymentCreated(
+                    deployment_id=deployment_id,
+                    workflow_id=workflow_id,
+                    state="PENDING",
+                    approval_status=(
+                        ApprovalStatus.PENDING if requires_approval else ApprovalStatus.APPROVED
+                    ),
+                )
 
     async def request_destroy(
         self,
@@ -512,6 +623,25 @@ class SliceService:
                         connection,
                         deployment_id,
                         node_ids=request.node_ids,
+                        complete=request.complete,
+                    )
+                except LookupError as exc:
+                    raise ResourceNotFoundError(str(exc)) from exc
+                except ValueError as exc:
+                    raise ConflictError(str(exc)) from exc
+
+    async def commit_update(
+        self, deployment_id: int, request: CommitUpdate
+    ) -> None:
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                try:
+                    await self._repository.commit_update(
+                        connection,
+                        deployment_id,
+                        removed_node_ids=request.removed_node_ids,
+                        updated_node_ids=request.updated_node_ids,
+                        detached_port_ids=request.detached_port_ids,
                         complete=request.complete,
                     )
                 except LookupError as exc:

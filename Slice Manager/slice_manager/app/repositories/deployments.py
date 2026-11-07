@@ -1039,8 +1039,8 @@ class DeploymentRepository:
     ) -> None:
         row = await connection.fetchrow(
             """
-            SELECT d.estado, a.estado AS approval_state, d.target_version_id,
-                   d.slice_id, s.zona_id, z.cluster_id, d.plan
+            SELECT d.estado, d.tipo, d.plan, a.estado AS approval_state, d.target_version_id,
+                   d.slice_id, s.zona_id, z.cluster_id
             FROM slices.deployment AS d
             JOIN slices.solicitud_aprobacion AS a ON a.deployment_id = d.id
             JOIN slices.slice AS s ON s.id = d.slice_id
@@ -1070,6 +1070,23 @@ class DeploymentRepository:
             """,
             row["target_version_id"],
         )
+        if row["tipo"] == "UPDATE":
+            plan = DeploymentPlan.model_validate_json(row["plan"])
+            node_ids = {
+                action.target.id
+                for round_actions in plan.rounds
+                for action in round_actions
+                if action.op in {ActionOp.CREATE_VM, ActionOp.RESIZE_VM, ActionOp.DELETE_VM}
+            }
+            if node_ids:
+                await connection.execute(
+                    """
+                    UPDATE slices.slice_nodo SET estado_nodo = 'PENDING'
+                    WHERE slice_id = $1 AND id = ANY($2::uuid[]) AND estado_nodo <> 'DELETED'
+                    """,
+                    row["slice_id"],
+                    list(node_ids),
+                )
 
     async def record_round_facts(
         self, connection: asyncpg.Connection, deployment_id: int, facts: RoundFacts
@@ -1127,6 +1144,21 @@ class DeploymentRepository:
             if not status.endswith(" 1"):
                 raise LookupError(f"node {result.target_id} was not found for action facts")
             return True
+        elif result.op == ActionOp.RESIZE_VM:
+            if deployment_type != "UPDATE":
+                return False
+            status = await connection.execute(
+                """
+                UPDATE slices.slice_nodo SET estado_nodo = $3
+                WHERE id = $1 AND slice_id = $2
+                """,
+                result.target_id,
+                slice_id,
+                "RUNNING" if result.succeeded else "FAILED",
+            )
+            if not status.endswith(" 1"):
+                raise LookupError(f"node {result.target_id} was not found for action facts")
+            return True
         elif result.op == ActionOp.DELETE_VM:
             if deployment_type == "UPDATE":
                 # P48 d: en Update, CREATE_VM o commit_update fijan el estado del nodo.
@@ -1158,11 +1190,12 @@ class DeploymentRepository:
         elif result.op == ActionOp.DELETE_LINK:
             status = await connection.execute(
                 """
-                UPDATE slices.slice_enlace SET estado = 'DELETED'
+                UPDATE slices.slice_enlace SET estado = $3
                 WHERE id = $1 AND slice_id = $2
                 """,
                 result.target_id,
                 slice_id,
+                "DELETED" if result.succeeded else "FAILED",
             )
             if not status.endswith(" 1"):
                 raise LookupError(f"link {result.target_id} was not found for action facts")
@@ -1187,10 +1220,11 @@ class DeploymentRepository:
         elif result.op == ActionOp.DETACH_PORT:
             status = await connection.execute(
                 """
-                UPDATE slices.slice_enlace_puerto SET estado = 'DELETED'
+                UPDATE slices.slice_enlace_puerto SET estado = $2
                 WHERE id = $1
                 """,
                 result.target_id,
+                "DELETED" if result.succeeded else "FAILED",
             )
             if not status.endswith(" 1"):
                 raise LookupError(f"port {result.target_id} was not found for action facts")
@@ -1309,23 +1343,54 @@ class DeploymentRepository:
                     """,
                     target_version_id,
                 )
-            await connection.execute(
-                """
-                UPDATE slices.slice_nodo SET estado_nodo = 'FAILED'
-                WHERE slice_id = $1 AND id = ANY($2::uuid[])
-                  AND estado_nodo <> 'DELETED'
-                """,
-                slice_id,
-                node_ids,
-            )
-            await connection.execute(
-                """
-                UPDATE slices.slice
-                SET estado = 'FAILED', version_activa_id = NULL, fecha_modificacion = now()
-                WHERE id = $1
-                """,
-                slice_id,
-            )
+            if row["tipo"] == "UPDATE":
+                # Solo los nodos con acción de cómputo en el plan; los conservados no se tocan.
+                node_ids = list(
+                    {
+                        action.target.id
+                        for round_actions in plan.rounds
+                        for action in round_actions
+                        if action.op in {ActionOp.CREATE_VM, ActionOp.RESIZE_VM, ActionOp.DELETE_VM}
+                    }
+                )
+            if row["tipo"] == "UPDATE":
+                # Facts de acciones exitosas ya dejaron RUNNING; solo PENDING no se ejecutó.
+                await connection.execute(
+                    """
+                    UPDATE slices.slice_nodo SET estado_nodo = 'FAILED'
+                    WHERE slice_id = $1 AND id = ANY($2::uuid[])
+                      AND estado_nodo = 'PENDING'
+                    """,
+                    slice_id,
+                    node_ids,
+                )
+                # El slice conserva su versión origen ACTIVE (P49).
+                await connection.execute(
+                    """
+                    UPDATE slices.slice
+                    SET estado = 'FAILED', fecha_modificacion = now()
+                    WHERE id = $1
+                    """,
+                    slice_id,
+                )
+            else:
+                await connection.execute(
+                    """
+                    UPDATE slices.slice_nodo SET estado_nodo = 'FAILED'
+                    WHERE slice_id = $1 AND id = ANY($2::uuid[])
+                      AND estado_nodo <> 'DELETED'
+                    """,
+                    slice_id,
+                    node_ids,
+                )
+                await connection.execute(
+                    """
+                    UPDATE slices.slice
+                    SET estado = 'FAILED', version_activa_id = NULL, fecha_modificacion = now()
+                    WHERE id = $1
+                    """,
+                    slice_id,
+                )
         else:
             if target_version_id is not None:
                 await connection.execute(

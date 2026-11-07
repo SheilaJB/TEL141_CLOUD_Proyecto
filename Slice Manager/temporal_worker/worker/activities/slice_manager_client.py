@@ -1,4 +1,5 @@
 from typing import Any
+from uuid import UUID
 
 import httpx
 from temporalio.exceptions import ApplicationError
@@ -8,10 +9,12 @@ from contracts.errors import ErrorCode, ErrorResponse
 from contracts.registry import (
     ApprovalState,
     CommitDestroy,
+    CommitUpdate,
     DeploymentContext,
     FinishDeployment,
     RoundFacts,
     RoundFactsResult,
+    SliceRuntime,
     StartDeployment,
 )
 from contracts.servers import ServerHost
@@ -50,6 +53,30 @@ class SliceManagerClient:
             f"/internal/deployments/{deployment_id}/destroy/commit",
             json=request.model_dump(mode="json"),
         )
+
+    async def commit_update(self, deployment_id: int, request: CommitUpdate) -> None:
+        await self._request(
+            "POST",
+            f"/internal/deployments/{deployment_id}/update/commit",
+            json=request.model_dump(mode="json"),
+        )
+
+    async def get_slice_runtime(
+        self,
+        slice_id: int,
+        node_ids: list[UUID] | None = None,
+    ) -> SliceRuntime:
+        params = (
+            {"node_ids": [str(item) for item in node_ids]}
+            if node_ids
+            else None
+        )
+        response = await self._request(
+            "GET",
+            f"/internal/slices/{slice_id}/runtime",
+            params=params,
+        )
+        return SliceRuntime.model_validate(response)
 
     async def get_server_directory(self, slice_id: int) -> list[ServerHost]:
         response = await self._request(
@@ -97,6 +124,7 @@ class SliceManagerClient:
         path: str,
         *,
         json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> Any:
         if not self._service_token:
             raise ApplicationError(
@@ -109,6 +137,7 @@ class SliceManagerClient:
                 method,
                 path,
                 json=json,
+                params=params,
                 headers={"X-Internal-Token": self._service_token},
             )
         except httpx.TransportError as exc:

@@ -77,6 +77,32 @@ class CommitUpdate(ContractModel):
     complete: bool
 
 
+class SliceRuntimeNode(ContractModel):
+    node_id: UUID
+    name: str
+    server_id: int | None = None
+    vnc_display: int | None = None
+
+
+class SliceRuntimePort(ContractModel):
+    port_id: UUID
+    link_id: UUID
+    node_id: UUID
+    public: bool = False
+    mac: str | None = None
+    ip: str | None = None
+    prefijo: int | None = None
+    nic_index: int | None = None
+    vlan_ctag: int | None = None
+
+
+class SliceRuntime(ContractModel):
+    slice_id: int
+    public_vid: int | None = None
+    nodes: list[SliceRuntimeNode] = Field(default_factory=list)
+    ports: list[SliceRuntimePort] = Field(default_factory=list)
+
+
 class FinishDeployment(ContractModel):
     event_id: str
     outcome: DeploymentOutcome

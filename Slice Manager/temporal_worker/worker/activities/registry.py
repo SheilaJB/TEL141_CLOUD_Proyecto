@@ -10,16 +10,20 @@ from contracts.queues import (
     ACTIVITY_BUILD_ADAPTER_ACTIONS,
     ACTIVITY_COMMIT_DESTROY,
     ACTIVITY_COMMIT_INVENTORY,
+    ACTIVITY_COMMIT_UPDATE,
     ACTIVITY_CREATE_INVENTORY,
     ACTIVITY_GET_SERVER_DIRECTORY,
 )
 from contracts.registry import (
     ApprovalState,
     CommitDestroy,
+    CommitUpdate,
     DeploymentContext,
     FinishDeployment,
     RoundFacts,
     RoundFactsResult,
+    SliceRuntime,
+    SliceRuntimePort,
     StartDeployment,
 )
 from temporalio import activity
@@ -50,6 +54,7 @@ class DeploymentActivities:
         network: NetworkAllocation,
         server_directory: list[ServerHost],
         vnc_displays: dict[str, int],
+        runtime: SliceRuntime | None = None,
     ) -> list[AdapterActionInput]:
         if placement.deployment_id != deployment_id or network.deployment_id != deployment_id:
             raise ValueError("decision results belong to a different deployment")
@@ -58,6 +63,37 @@ class DeploymentActivities:
         ports_by_node: dict[UUID, list[NetworkPortAllocation]] = {}
         for port in network.ports:
             ports_by_node.setdefault(port.node_id, []).append(port)
+        detach_port_ids = {
+            action.target.id
+            for round_actions in plan.rounds
+            for action in round_actions
+            if action.op == ActionOp.DETACH_PORT
+        }
+        server_by_node = placement.server_by_node
+        vnc_by_node = vnc_displays
+        runtime_ports_by_node: dict[UUID, list[SliceRuntimePort]] = {}
+        if runtime is not None:
+            # Solo se usa BD para nodos que no vienen de Placement (Update).
+            server_by_node = {
+                **placement.server_by_node,
+                **{
+                    node.node_id: node.server_id
+                    for node in runtime.nodes
+                    if node.server_id is not None
+                    and node.node_id not in placement.server_by_node
+                },
+            }
+            vnc_by_node = {
+                **vnc_displays,
+                **{
+                    str(node.node_id): node.vnc_display
+                    for node in runtime.nodes
+                    if node.vnc_display is not None
+                    and str(node.node_id) not in vnc_displays
+                },
+            }
+            for port in runtime.ports:
+                runtime_ports_by_node.setdefault(port.node_id, []).append(port)
         actions: list[AdapterActionInput] = []
 
         def host_for(server_id: int) -> AdapterHost:
@@ -75,7 +111,7 @@ class DeploymentActivities:
             )
 
         def display_for(node_id: UUID) -> int:
-            value = vnc_displays.get(str(node_id))
+            value = vnc_by_node.get(str(node_id))
             if value is None:
                 raise ValueError(f"missing vnc_display for node {node_id}")
             return int(value)
@@ -113,6 +149,27 @@ class DeploymentActivities:
                     ),
                     None,
                 ),
+            }
+
+        def runtime_nic(port: SliceRuntimePort) -> dict[str, object]:
+            if not port.mac or not port.ip or port.nic_index is None:
+                raise ValueError(
+                    f"incomplete live network port {port.port_id}"
+                )
+            return {
+                "port_id": str(port.port_id),
+                "ip": port.ip,
+                "mac": port.mac,
+                "nic_index": port.nic_index,
+                "publico": port.public,
+                "prefijo": port.prefijo,
+                "gateway": None,
+                "public_vid": (
+                    runtime.public_vid
+                    if runtime is not None and runtime.public_vid is not None
+                    else network.public_vid
+                ),
+                "vlan_ctag": port.vlan_ctag,
             }
 
         def reject_commands(value: object) -> None:
@@ -158,10 +215,10 @@ class DeploymentActivities:
                     for port in network.ports:
                         if port.link_id != action.target.id:
                             continue
-                        server = placement.server_by_node.get(port.node_id)
+                        server = server_by_node.get(port.node_id)
                         if server is None:
                             raise ValueError(
-                                f"missing Placement result for node {port.node_id}"
+                                f"missing server for node {port.node_id}"
                             )
                         link_server_ids.add(server)
                     if not link_server_ids:
@@ -191,21 +248,21 @@ class DeploymentActivities:
                     )
                     params["publico"] = allocation.publico
                     params["public_vid"] = network.public_vid
-                    server_id = placement.server_by_node.get(action.target.node_id)
+                    server_id = server_by_node.get(action.target.node_id)
                     if server_id is None:
                         raise ValueError(
-                            f"missing Placement result for node {action.target.node_id}"
+                            f"missing server for node {action.target.node_id}"
                         )
                     host = host_for(server_id)
                 elif action.op == ActionOp.CREATE_VM:
-                    server_id = placement.server_by_node.get(action.target.id)
+                    server_id = server_by_node.get(action.target.id)
                     if server_id is None:
                         raise ValueError(
-                            f"missing Placement result for node {action.target.id}"
+                            f"missing server for node {action.target.id}"
                         )
                     host = host_for(server_id)
                     params["vnc_display"] = display_for(action.target.id)
-                    params["nics"] = [
+                    new_nics = [
                         nic_for(port)
                         for port in sorted(
                             ports_by_node.get(action.target.id, []),
@@ -214,7 +271,41 @@ class DeploymentActivities:
                             ),
                         )
                     ]
+                    if runtime is None:
+                        params["nics"] = new_nics
+                    else:
+                        live_nics = [
+                            runtime_nic(port)
+                            for port in runtime_ports_by_node.get(action.target.id, [])
+                            if port.port_id not in detach_port_ids
+                        ]
+                        params["nics"] = sorted(
+                            [*live_nics, *new_nics],
+                            key=lambda item: (
+                                item["nic_index"]
+                                if item["nic_index"] is not None
+                                else -1,
+                                str(item["port_id"]),
+                            ),
+                        )
                     params["hostname"] = params["hostname"] if "hostname" in params else "ubuntu"
+                elif action.op in {ActionOp.DELETE_VM, ActionOp.RESIZE_VM}:
+                    server_id = server_by_node.get(action.target.id)
+                    if server_id is None:
+                        raise ValueError(
+                            f"missing server for node {action.target.id}"
+                        )
+                    host = host_for(server_id)
+                elif action.op == ActionOp.DETACH_PORT:
+                    node_id = action.target.node_id
+                    if node_id is None:
+                        raise ValueError(
+                            f"DETACH_PORT action {action.id} has no node target"
+                        )
+                    server_id = server_by_node.get(node_id)
+                    if server_id is None:
+                        raise ValueError(f"missing server for node {node_id}")
+                    host = host_for(server_id)
                 enriched = action.model_copy(
                     update={"params": params, "frozen": False}
                 )
@@ -232,6 +323,46 @@ class DeploymentActivities:
                 )
         return actions
 
+    @staticmethod
+    def _missing_runtime_nodes(
+        plan: DeploymentPlan,
+        placement: PlacementResult,
+        vnc_displays: dict[str, int],
+    ) -> set[UUID]:
+        required_servers: set[UUID] = set()
+        required_vnc: set[UUID] = set()
+        for round_actions in plan.rounds:
+            for action in round_actions:
+                if action.op in {
+                    ActionOp.CREATE_VM,
+                    ActionOp.DELETE_VM,
+                    ActionOp.RESIZE_VM,
+                }:
+                    required_servers.add(action.target.id)
+                    if action.op == ActionOp.CREATE_VM:
+                        required_vnc.add(action.target.id)
+                elif action.op in {ActionOp.ATTACH_PORT, ActionOp.DETACH_PORT}:
+                    if action.target.node_id is not None:
+                        required_servers.add(action.target.node_id)
+                elif action.op == ActionOp.CREATE_LINK:
+                    after = action.after
+                    if isinstance(after, dict):
+                        endpoints = after.get("endpoints")
+                        if isinstance(endpoints, list):
+                            for value in endpoints:
+                                required_servers.add(UUID(str(value)))
+        missing = {
+            node_id
+            for node_id in required_servers
+            if node_id not in placement.server_by_node
+        }
+        missing.update(
+            node_id
+            for node_id in required_vnc
+            if str(node_id) not in vnc_displays
+        )
+        return missing
+
     @activity.defn(name=ACTIVITY_BUILD_ADAPTER_ACTIONS)
     async def build_adapter_actions(
         self,
@@ -242,6 +373,13 @@ class DeploymentActivities:
         server_directory: list[ServerHost],
         vnc_displays: dict[str, int],
     ) -> list[AdapterActionInput]:
+        runtime = None
+        missing = self._missing_runtime_nodes(plan, placement, vnc_displays)
+        if missing:
+            runtime = await self._slice_manager.get_slice_runtime(
+                network.slice_id,
+                sorted(missing, key=str),
+            )
         return self._build_adapter_actions(
             deployment_id,
             plan,
@@ -249,6 +387,7 @@ class DeploymentActivities:
             network,
             server_directory,
             vnc_displays,
+            runtime=runtime,
         )
 
     @activity.defn(name=ACTIVITY_CREATE_INVENTORY)
@@ -262,6 +401,10 @@ class DeploymentActivities:
     @activity.defn(name=ACTIVITY_COMMIT_DESTROY)
     async def commit_destroy(self, deployment_id: int, request: CommitDestroy) -> None:
         await self._slice_manager.commit_destroy(deployment_id, request)
+
+    @activity.defn(name=ACTIVITY_COMMIT_UPDATE)
+    async def commit_update(self, deployment_id: int, request: CommitUpdate) -> None:
+        await self._slice_manager.commit_update(deployment_id, request)
 
     @activity.defn(name=ACTIVITY_GET_SERVER_DIRECTORY)
     async def get_server_directory(self, slice_id: int) -> list[ServerHost]:

@@ -1,6 +1,7 @@
 from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from contracts.registry import (
     ApprovalState,
@@ -10,6 +11,7 @@ from contracts.registry import (
     FinishDeployment,
     RoundFacts,
     RoundFactsResult,
+    SliceRuntime,
     StartDeployment,
 )
 from contracts.servers import ServerHost
@@ -33,6 +35,15 @@ async def get_server_directory(
     service: Annotated[SliceService, Depends(get_slice_service)],
 ) -> list[ServerHost]:
     return await service.get_server_directory(slice_id)
+
+
+@router.get("/slices/{slice_id}/runtime", response_model=SliceRuntime)
+async def get_slice_runtime(
+    slice_id: int,
+    service: Annotated[SliceService, Depends(get_slice_service)],
+    node_ids: Annotated[list[UUID] | None, Query()] = None,
+) -> SliceRuntime:
+    return await service.get_slice_runtime(slice_id, node_ids)
 
 
 @router.post("/deployments/{deployment_id}/inventory", status_code=204)

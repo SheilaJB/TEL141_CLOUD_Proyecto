@@ -2,6 +2,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Protocol
+from uuid import UUID
 
 import asyncpg
 
@@ -16,6 +17,7 @@ from contracts.registry import (
     FinishDeployment,
     RoundFacts,
     RoundFactsResult,
+    SliceRuntime,
     StartDeployment,
 )
 from contracts.servers import ServerHost
@@ -44,6 +46,8 @@ class WorkflowClient(Protocol):
     async def start_deploy(self, deployment_id: int, workflow_id: str) -> None: ...
 
     async def start_destroy(self, deployment_id: int, workflow_id: str) -> None: ...
+
+    async def start_update(self, deployment_id: int, workflow_id: str) -> None: ...
 
     async def signal_approval(
         self,
@@ -260,11 +264,15 @@ class SliceService:
             [asyncpg.Connection, asyncpg.Record, int], Awaitable[DeploymentPlan]
         ],
     ) -> DeploymentCreated:
-        """Crea el deployment UPDATE y sus filas PENDING (P52). No arranca workflow (paso 8).
+        """Crea el deployment UPDATE, sus filas PENDING (P52) y arranca UpdateWorkflow.
 
         `plan_factory(connection, context, deployment_id)` construye el plan con el scope
-        `deployment:{id}` y los IDs existentes (P42); aún no hay loader de la IR actual.
+        `deployment:{id}` y los IDs existentes (P42); el loader de la IR actual queda pendiente.
         """
+        if not self._settings.internal_service_token:
+            raise WorkflowUnavailableError(
+                "ORCHESTRATOR_INTERNAL_SERVICE_TOKEN must be configured"
+            )
         async with self._pool.acquire() as connection:
             async with connection.transaction():
                 await self._repository.lock_slice_owner(connection, slice_id)
@@ -334,31 +342,54 @@ class SliceService:
                         deployment_type="UPDATE",
                         origin_version_id=origin["version_activa_id"],
                     )
-                    return DeploymentCreated(
+                    created = DeploymentCreated(
                         deployment_id=deployment_id,
                         state="REJECTED",
                         approval_status=ApprovalStatus.REJECTED_BY_SYSTEM,
                         rejection_reason=rejection_reason,
                     )
-                requires_approval = context["service_level"] == "basico"
-                workflow_id = await self._repository.create_update_deployment(
-                    connection,
-                    deployment_id=deployment_id,
-                    slice_id=slice_id,
-                    origin_version_id=origin["version_activa_id"],
-                    target_version_id=context["version_id"],
-                    requester_id=requester_id,
-                    plan=plan,
-                    requires_approval=requires_approval,
+                else:
+                    requires_approval = context["service_level"] == "basico"
+                    workflow_id = await self._repository.create_update_deployment(
+                        connection,
+                        deployment_id=deployment_id,
+                        slice_id=slice_id,
+                        origin_version_id=origin["version_activa_id"],
+                        target_version_id=context["version_id"],
+                        requester_id=requester_id,
+                        plan=plan,
+                        requires_approval=requires_approval,
+                    )
+                    created = DeploymentCreated(
+                        deployment_id=deployment_id,
+                        workflow_id=workflow_id,
+                        state="PENDING",
+                        approval_status=(
+                            ApprovalStatus.PENDING
+                            if requires_approval
+                            else ApprovalStatus.APPROVED
+                        ),
+                    )
+
+        if created.workflow_id is not None and created.state == "PENDING":
+            logger.info(
+                "Starting update workflow",
+                extra={
+                    "deployment_id": created.deployment_id,
+                    "workflow_id": created.workflow_id,
+                    "idempotency_key": created.deployment_id,
+                },
+            )
+            try:
+                await self._workflow_client.start_update(
+                    created.deployment_id,
+                    created.workflow_id,
                 )
-                return DeploymentCreated(
-                    deployment_id=deployment_id,
-                    workflow_id=workflow_id,
-                    state="PENDING",
-                    approval_status=(
-                        ApprovalStatus.PENDING if requires_approval else ApprovalStatus.APPROVED
-                    ),
-                )
+            except WorkflowStartError as exc:
+                raise WorkflowUnavailableError(
+                    f"could not start Temporal workflow {created.workflow_id}"
+                ) from exc
+        return created
 
     async def request_destroy(
         self,
@@ -542,6 +573,8 @@ class SliceService:
             try:
                 if tipo == "DESTROY":
                     await self._workflow_client.start_destroy(deployment_id, workflow_id)
+                elif tipo == "UPDATE":
+                    await self._workflow_client.start_update(deployment_id, workflow_id)
                 else:
                     await self._workflow_client.start_deploy(deployment_id, workflow_id)
                 started += 1
@@ -592,6 +625,22 @@ class SliceService:
             )
             for row in rows
         ]
+
+    async def get_slice_runtime(
+        self,
+        slice_id: int,
+        node_ids: list[UUID] | None = None,
+    ) -> SliceRuntime:
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                try:
+                    return await self._repository.load_slice_runtime(
+                        connection,
+                        slice_id,
+                        node_ids=node_ids,
+                    )
+                except LookupError as exc:
+                    raise ResourceNotFoundError(str(exc)) from exc
 
     async def create_inventory(self, deployment_id: int) -> None:
         async with self._pool.acquire() as connection:

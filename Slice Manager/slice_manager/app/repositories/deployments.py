@@ -13,6 +13,9 @@ from contracts.registry import (
     FinishDeployment,
     RoundFacts,
     RoundFactsResult,
+    SliceRuntime,
+    SliceRuntimeNode,
+    SliceRuntimePort,
 )
 from slice_manager.app.planning.destroy_planner import DestroyLink, DestroyNode
 # from slice_manager.app.planning.planner import CatalogFlavor, CatalogImage
@@ -684,6 +687,79 @@ class DeploymentRepository:
             slice_id,
         )
 
+    async def load_slice_runtime(
+        self,
+        connection: asyncpg.Connection,
+        slice_id: int,
+        *,
+        node_ids: list[UUID] | None = None,
+    ) -> SliceRuntime:
+        # Lectura acotada a nodos que no vienen de Placement (Update). No escribe nada.
+        slice_row = await connection.fetchrow(
+            "SELECT id, vlan_stag FROM slices.slice WHERE id = $1",
+            slice_id,
+        )
+        if slice_row is None:
+            raise LookupError(f"slice {slice_id} was not found")
+        filter_ids = node_ids or None
+        node_rows = await connection.fetch(
+            """
+            SELECT n.id AS node_id, n.name, n.server_id, n.vnc_display
+            FROM slices.slice_nodo AS n
+            WHERE n.slice_id = $1
+              AND n.estado_nodo <> 'DELETED'
+              AND ($2::uuid[] IS NULL OR n.id = ANY($2::uuid[]))
+            ORDER BY n.id
+            """,
+            slice_id,
+            filter_ids,
+        )
+        port_rows = await connection.fetch(
+            """
+            SELECT p.id AS port_id, p.enlace_id AS link_id, p.nodo_id,
+                   p.public, p.mac::text AS mac, host(p.ip) AS ip,
+                   masklen(p.ip) AS prefijo, p.nic_index, e.vlan_ctag
+            FROM slices.slice_enlace_puerto AS p
+            JOIN slices.slice_enlace AS e ON e.id = p.enlace_id
+            JOIN slices.slice_nodo AS n ON n.id = p.nodo_id
+            WHERE e.slice_id = $1
+              AND p.estado = 'ATTACHED'
+              AND e.estado <> 'DELETED'
+              AND n.estado_nodo <> 'DELETED'
+              AND ($2::uuid[] IS NULL OR p.nodo_id = ANY($2::uuid[]))
+            ORDER BY p.nodo_id, p.nic_index, p.id
+            """,
+            slice_id,
+            filter_ids,
+        )
+        return SliceRuntime(
+            slice_id=slice_id,
+            public_vid=slice_row["vlan_stag"],
+            nodes=[
+                SliceRuntimeNode(
+                    node_id=row["node_id"],
+                    name=row["name"],
+                    server_id=row["server_id"],
+                    vnc_display=row["vnc_display"],
+                )
+                for row in node_rows
+            ],
+            ports=[
+                SliceRuntimePort(
+                    port_id=row["port_id"],
+                    link_id=row["link_id"],
+                    node_id=row["nodo_id"],
+                    public=row["public"],
+                    mac=row["mac"],
+                    ip=row["ip"],
+                    prefijo=row["prefijo"],
+                    nic_index=row["nic_index"],
+                    vlan_ctag=row["vlan_ctag"],
+                )
+                for row in port_rows
+            ],
+        )
+
     async def create_inventory(
         self, connection: asyncpg.Connection, deployment_id: int
     ) -> None:
@@ -920,6 +996,7 @@ class DeploymentRepository:
         updated_changes: dict[UUID, dict[str, object]] = {}
         for intent in plan.intents:
             if intent.target.table != "vms" or intent.kind not in {
+                IntentKind.CREATE,
                 IntentKind.RECREATE,
                 IntentKind.MODIFY,
             }:

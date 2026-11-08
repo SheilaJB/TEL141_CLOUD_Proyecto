@@ -10,6 +10,7 @@ from contracts.adapter import AdapterActionInput
 
 from . import config, host, libvirt_vm
 from .cloudinit import render_network_config
+from .destroy import _stop_vm
 from .errors import NonRetryableError, RetryableError
 
 # Flag fijo: False = ninguna VM usa seed cloud-init.
@@ -122,6 +123,31 @@ def create_vm(request: AdapterActionInput) -> dict:
         "overlay_ref": overlay,
         "seed_sha256": seed_hash,
     }
+
+def delete_vm(request: AdapterActionInput) -> dict:
+    target = _require_host(request)
+    address = target.management_ip
+    vm_id = str(_param(request, "vm_id") or request.action.target.id)
+    vm_name = "vm-" + vm_id[:8]
+
+    was_running = _running(address, vm_name)
+    overlay = str(config.STORAGE_ROOT / "overlay" / f"{vm_id}.qcow2")
+    had_overlay = _exists(address, overlay)
+
+    _stop_vm(address, vm_name)
+    libvirt_vm.undefine(address, vm_name)
+
+    for path in (
+        _run_path(vm_name),
+        overlay,
+        str(config.STORAGE_ROOT / "seeds" / f"{vm_id}.iso"),
+        str(config.RUN_ROOT / f"{vm_name}.pid"),
+        str(config.STORAGE_ROOT / "overlays" / f"{vm_id}.qcow2"),
+    ):
+        host.run(address, ["rm", "-f", path])
+
+    already_absent = not was_running and not had_overlay
+    return {"_already_absent": already_absent}
 
 
 def _exists(address: str, path: str) -> bool:

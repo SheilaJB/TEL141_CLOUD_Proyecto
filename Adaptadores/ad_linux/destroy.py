@@ -14,7 +14,10 @@ from contracts.adapter import AdapterActionInput
 
 from . import config, host, libvirt_vm
 from .errors import NonRetryableError, RetryableError
-from .vm import _run_path
+
+
+def _run_path(name: str) -> str:
+    return str(config.RUN_ROOT / name)
 
 TERM_WAIT_SECONDS = 10
 KILL_WAIT_SECONDS = 5

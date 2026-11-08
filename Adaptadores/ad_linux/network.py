@@ -155,6 +155,61 @@ def attach_port(request: AdapterActionInput) -> dict:
     host.run(ip, ["ip", "link", "set", tap, "up"])
     return {"tap_names": [tap], "_already_existed": already_existed}
 
+def detach_port(request: AdapterActionInput) -> dict:
+    target = _require_host(request.host)
+    ip = target.management_ip
+    port_id = _param(request, "port_id") or str(request.action.target.id)
+    tap = _tap_name(str(port_id))
+    bridge = PROVIDER_BRIDGE if _param(request, "publico") else f"br-sl-{request.slice_id}"
+
+    existed = _link_exists(ip, tap)
+    host.run(ip, ["ovs-vsctl", "--if-exists", "del-port", bridge, tap])
+    host.run(ip, ["ovs-vsctl", "--if-exists", "del-port", tap])
+    if existed:
+        try:
+            host.run(ip, ["ip", "link", "del", tap])
+        except RuntimeError:
+            pass
+    return {"tap_names": [], "_already_absent": not existed}
+
+
+def delete_link(request: AdapterActionInput) -> dict:
+    targets = request.hosts or ([request.host] if request.host else [])
+    if not targets:
+        raise NonRetryableError("HOSTS_MISSING")
+    slice_id = request.slice_id
+    params = request.action.params
+    publico = bool((params.get("network") or {}).get("publico"))
+
+    if publico:
+        return {"tap_names": []}
+
+    bridge = f"br-sl-{slice_id}"
+    vx = f"vx-{slice_id}"
+    vw = f"vw-{slice_id}"
+
+    for target in targets:
+        _validate_host(target)
+        ip = target.management_ip
+        with _trunk_lock(ip, slice_id):
+            host.run(ip, ["ovs-vsctl", "--if-exists", "del-port", PROVIDER_BRIDGE, vw])
+            host.run(ip, ["ovs-vsctl", "--if-exists", "del-port", bridge, vx])
+            if _link_exists(ip, vx):
+                try:
+                    host.run(ip, ["ip", "link", "del", vx])
+                except RuntimeError:
+                    pass
+            try:
+                ports_raw = host.run(ip, ["ovs-vsctl", "list-ports", bridge])
+                remaining = [p.strip() for p in ports_raw.splitlines() if p.strip()]
+            except RuntimeError:
+                remaining = []
+            remaining_non_trunk = [p for p in remaining if p not in (vx, vw)]
+            if not remaining_non_trunk:
+                host.run(ip, ["ovs-vsctl", "--if-exists", "del-br", bridge])
+
+    return {"tap_names": []}
+
 
 def delete_slice_network(request: AdapterActionInput) -> dict:
     """Destroy de todo el slice: br-sl-<slice> y veth hacia provider.

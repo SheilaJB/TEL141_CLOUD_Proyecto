@@ -15,8 +15,11 @@ Handler = Callable[[AdapterActionInput], dict[str, Any]]
 
 _HANDLERS: dict[ActionOp, Handler] = {
     ActionOp.CREATE_LINK: handlers.create_link,
+    ActionOp.DELETE_LINK: handlers.delete_link,
     ActionOp.ATTACH_PORT: handlers.attach_port,
+    ActionOp.DETACH_PORT: handlers.detach_port,
     ActionOp.CREATE_VM: handlers.create_vm,
+    ActionOp.DELETE_VM: handlers.delete_vm,
     ActionOp.DESTROY_SLICE_HOST: handlers.destroy_slice_host,
 }
 _ALLOWED_FACTS = {
@@ -73,21 +76,29 @@ def _dispatch(request: AdapterActionInput, operation: ActionOp) -> AdapterAction
 async def create_link(request: AdapterActionInput) -> AdapterActionOutput:
     return await _dispatch_async(request, ActionOp.CREATE_LINK)
 
+@activity.defn(name="delete_link")
+async def delete_link(request: AdapterActionInput) -> AdapterActionOutput:
+    return await _dispatch_async(request, ActionOp.DELETE_LINK)
 
 @activity.defn(name="attach_port")
 async def attach_port(request: AdapterActionInput) -> AdapterActionOutput:
     return await _dispatch_async(request, ActionOp.ATTACH_PORT)
 
+@activity.defn(name="detach_port")
+async def detach_port(request: AdapterActionInput) -> AdapterActionOutput:
+    return await _dispatch_async(request, ActionOp.DETACH_PORT)
 
 @activity.defn(name="create_vm")
 async def create_vm(request: AdapterActionInput) -> AdapterActionOutput:
     return await _dispatch_async(request, ActionOp.CREATE_VM)
 
+@activity.defn(name="delete_vm")
+async def delete_vm(request: AdapterActionInput) -> AdapterActionOutput:
+    return await _dispatch_async(request, ActionOp.DELETE_VM)
 
 @activity.defn(name="destroy_slice_host")
 async def destroy_slice_host(request: AdapterActionInput) -> AdapterActionOutput:
     return await _dispatch_async(request, ActionOp.DESTROY_SLICE_HOST)
-
 
 async def _dispatch_async(
     request: AdapterActionInput, operation: ActionOp
@@ -96,10 +107,12 @@ async def _dispatch_async(
 
     return await asyncio.to_thread(_dispatch, request, operation)
 
-
 ADAPTER_ACTIVITIES = [
     create_link,
+    delete_link,
     attach_port,
+    detach_port,
     create_vm,
+    delete_vm,
     destroy_slice_host,
 ]

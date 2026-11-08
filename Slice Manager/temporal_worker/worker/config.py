@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     temporal_task_queue: str = "orchestrator-queue"
     slice_manager_url: str = "http://localhost:8000"
     internal_service_token: str | None = None
+    public_gateway: str = "10.60.5.1"
 
 
 def load_settings() -> Settings:

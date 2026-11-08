@@ -24,6 +24,7 @@ from slice_manager.app.planning.common import CatalogFlavor, CatalogImage
 # Columnas de facts que el DDL actual puede persistir
 _SUPPORTED_ACTION_FACTS: dict[ActionOp, frozenset[str]] = {
     ActionOp.CREATE_VM: frozenset({"pid"}),
+    ActionOp.RESIZE_VM: frozenset(),
     ActionOp.ATTACH_PORT: frozenset({"mac", "ip"}),
     ActionOp.CREATE_LINK: frozenset(),
     ActionOp.DELETE_VM: frozenset(),

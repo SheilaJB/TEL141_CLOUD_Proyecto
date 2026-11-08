@@ -37,7 +37,10 @@ async def run_worker() -> None:
         settings.slice_manager_url,
         settings.internal_service_token,
     )
-    activities = DeploymentActivities(slice_manager=slice_manager)
+    activities = DeploymentActivities(
+        slice_manager=slice_manager,
+        public_gateway=settings.public_gateway,
+    )
     worker = Worker(
         temporal_client,
         task_queue=settings.temporal_task_queue or ORCHESTRATOR_QUEUE,

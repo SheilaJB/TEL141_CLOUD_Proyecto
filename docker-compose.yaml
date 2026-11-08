@@ -142,6 +142,7 @@ services:
       ORCHESTRATOR_SLICE_MANAGER_URL: http://slice-manager:8000
       ORCHESTRATOR_INTERNAL_SERVICE_TOKEN: ${ORCHESTRATOR_INTERNAL_SERVICE_TOKEN}
       APPROVAL_TIMEOUT_SECONDS: ${APPROVAL_TIMEOUT_SECONDS:-86400}
+      GATEWAY_IP: ${GATEWAY_IP:-10.60.5.1}
     networks: [backend]
 
   # Worker Temporal de VM Placement
@@ -186,6 +187,7 @@ services:
       TEMPORAL_TASK_QUEUE: ${NETWORK_MANAGER_TEMPORAL_TASK_QUEUE:-network-queue}
       PRIVATE_P2P_BASE: ${NETWORK_MANAGER_PRIVATE_P2P_BASE:-192.168.1.0/24}
       PUBLIC_VID: ${NETWORK_MANAGER_PUBLIC_VID:-4000}
+      GATEWAY_IP: ${GATEWAY_IP:-10.60.5.1}
     networks: [backend]
 
   # Worker Temporal del Compute Manager: decisiones y registro de displays

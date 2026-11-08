@@ -43,8 +43,10 @@ class DeploymentActivities:
     def __init__(
         self,
         slice_manager: SliceManagerClient,
+        public_gateway: str = "10.60.5.1",
     ) -> None:
         self._slice_manager = slice_manager
+        self._public_gateway = public_gateway
 
     @staticmethod
     def _build_adapter_actions(
@@ -55,6 +57,7 @@ class DeploymentActivities:
         server_directory: list[ServerHost],
         vnc_displays: dict[str, int],
         runtime: SliceRuntime | None = None,
+        public_gateway: str = "10.60.5.1",
     ) -> list[AdapterActionInput]:
         if placement.deployment_id != deployment_id or network.deployment_id != deployment_id:
             raise ValueError("decision results belong to a different deployment")
@@ -163,7 +166,7 @@ class DeploymentActivities:
                 "nic_index": port.nic_index,
                 "publico": port.public,
                 "prefijo": port.prefijo,
-                "gateway": None,
+                "gateway": public_gateway if port.public else None,
                 "public_vid": (
                     runtime.public_vid
                     if runtime is not None and runtime.public_vid is not None
@@ -248,6 +251,7 @@ class DeploymentActivities:
                     )
                     params["publico"] = allocation.publico
                     params["public_vid"] = network.public_vid
+                    # Nodo existente: server_by_node se completa desde slice_nodo.server_id.
                     server_id = server_by_node.get(action.target.node_id)
                     if server_id is None:
                         raise ValueError(
@@ -388,6 +392,7 @@ class DeploymentActivities:
             server_directory,
             vnc_displays,
             runtime=runtime,
+            public_gateway=self._public_gateway,
         )
 
     @activity.defn(name=ACTIVITY_CREATE_INVENTORY)

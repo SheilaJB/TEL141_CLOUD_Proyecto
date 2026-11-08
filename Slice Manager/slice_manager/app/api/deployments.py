@@ -8,6 +8,7 @@ from pydantic import Field
 from contracts.registry import ApprovalDecision, DeploymentCreated
 from slice_manager.app.api.dependencies import get_current_user_id, get_slice_service
 from slice_manager.app.domain.slice_service import SliceService
+from slice_manager.app.planning.definition import SliceDefinition
 
 router = APIRouter()
 
@@ -33,6 +34,31 @@ async def request_deploy(
         slice_id=slice_id,
         version_number=version_number,
         requester_id=user_id,
+    )
+    if created.state == "REJECTED":
+        response.status_code = status.HTTP_409_CONFLICT
+    return created
+
+
+@router.post(
+    "/slices/{slice_id}/versions/{version_number}/update",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=DeploymentCreated,
+)
+async def request_update(
+    slice_id: int,
+    version_number: int,
+    desired: SliceDefinition,
+    response: Response,
+    user_id: Annotated[int, Depends(get_current_user_id)],
+    service: Annotated[SliceService, Depends(get_slice_service)],
+) -> DeploymentCreated:
+    created = await service.request_update(
+        slice_id=slice_id,
+        version_number=version_number,
+        requester_id=user_id,
+        desired=desired,
+        plan_factory=service.update_plan_factory(desired),
     )
     if created.state == "REJECTED":
         response.status_code = status.HTTP_409_CONFLICT

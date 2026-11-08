@@ -88,7 +88,7 @@ class SliceRuntimePort(ContractModel):
     port_id: UUID
     link_id: UUID
     node_id: UUID
-    public: bool = False
+    public: bool
     mac: str | None = None
     ip: str | None = None
     prefijo: int | None = None
@@ -96,11 +96,17 @@ class SliceRuntimePort(ContractModel):
     vlan_ctag: int | None = None
 
 
+class SliceRuntimeLink(ContractModel):
+    link_id: UUID
+    public: bool
+
+
 class SliceRuntime(ContractModel):
     slice_id: int
     public_vid: int | None = None
     nodes: list[SliceRuntimeNode] = Field(default_factory=list)
     ports: list[SliceRuntimePort] = Field(default_factory=list)
+    links: list[SliceRuntimeLink] = Field(default_factory=list)
 
 
 class FinishDeployment(ContractModel):

@@ -23,6 +23,7 @@ from contracts.registry import (
     RoundFacts,
     RoundFactsResult,
     SliceRuntime,
+    SliceRuntimeLink,
     SliceRuntimePort,
     StartDeployment,
 )
@@ -75,6 +76,8 @@ class DeploymentActivities:
         server_by_node = placement.server_by_node
         vnc_by_node = vnc_displays
         runtime_ports_by_node: dict[UUID, list[SliceRuntimePort]] = {}
+        runtime_ports_by_id: dict[UUID, SliceRuntimePort] = {}
+        runtime_links: dict[UUID, SliceRuntimeLink] = {}
         if runtime is not None:
             # Solo se usa BD para nodos que no vienen de Placement (Update).
             server_by_node = {
@@ -97,6 +100,8 @@ class DeploymentActivities:
             }
             for port in runtime.ports:
                 runtime_ports_by_node.setdefault(port.node_id, []).append(port)
+                runtime_ports_by_id[port.port_id] = port
+            runtime_links = {link.link_id: link for link in runtime.links}
         actions: list[AdapterActionInput] = []
 
         def host_for(server_id: int) -> AdapterHost:
@@ -310,6 +315,24 @@ class DeploymentActivities:
                     if server_id is None:
                         raise ValueError(f"missing server for node {node_id}")
                     host = host_for(server_id)
+                    port = runtime_ports_by_id.get(action.target.id)
+                    if port is None or port.node_id != node_id or port.link_id != action.target.link_id:
+                        raise ValueError(f"missing runtime port {action.target.id}")
+                    params["publico"] = port.public
+                elif action.op == ActionOp.DELETE_LINK:
+                    link = runtime_links.get(action.target.id)
+                    if link is None:
+                        raise ValueError(f"missing runtime link {action.target.id}")
+                    params["publico"] = link.public
+                    link_server_ids = set()
+                    for port in runtime_ports_by_id.values():
+                        if port.link_id != action.target.id:
+                            continue
+                        server = server_by_node.get(port.node_id)
+                        if server is None:
+                            raise ValueError(f"missing server for node {port.node_id}")
+                        link_server_ids.add(server)
+                    hosts = [host_for(server) for server in sorted(link_server_ids)]
                 enriched = action.model_copy(
                     update={"params": params, "frozen": False}
                 )
@@ -335,6 +358,7 @@ class DeploymentActivities:
     ) -> set[UUID]:
         required_servers: set[UUID] = set()
         required_vnc: set[UUID] = set()
+        intents = {intent.id: intent for intent in plan.intents}
         for round_actions in plan.rounds:
             for action in round_actions:
                 if action.op in {
@@ -355,6 +379,12 @@ class DeploymentActivities:
                         if isinstance(endpoints, list):
                             for value in endpoints:
                                 required_servers.add(UUID(str(value)))
+                elif action.op == ActionOp.DELETE_LINK:
+                    intent = intents.get(action.intent_id)
+                    if intent is not None:
+                        for change in intent.changes:
+                            if change.field == "endpoints" and isinstance(change.before, list):
+                                required_servers.update(UUID(str(value)) for value in change.before)
         missing = {
             node_id
             for node_id in required_servers
@@ -379,7 +409,14 @@ class DeploymentActivities:
     ) -> list[AdapterActionInput]:
         runtime = None
         missing = self._missing_runtime_nodes(plan, placement, vnc_displays)
-        if missing:
+        needs_network_runtime = any(
+            action.op in {ActionOp.DELETE_LINK, ActionOp.DETACH_PORT}
+            for round_actions in plan.rounds
+            for action in round_actions
+        )
+        if needs_network_runtime:
+            runtime = await self._slice_manager.get_slice_runtime(network.slice_id)
+        elif missing:
             runtime = await self._slice_manager.get_slice_runtime(
                 network.slice_id,
                 sorted(missing, key=str),

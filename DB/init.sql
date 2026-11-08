@@ -168,10 +168,10 @@ INSERT INTO slices.servidor (ip_serv, mac_serv, total_cpu_cores, total_ram_mb, t
 
 CREATE TABLE slices.image (
     id                      SERIAL PRIMARY KEY,
-    nombre                  TEXT NOT NULL,
+    nombre                  TEXT NOT NULL UNIQUE,
     cluster_compatible      INTEGER REFERENCES slices.cluster(id),  -- puede ser NULL, cluster donde se puede desplegar la imagen
     ruta_referencia         TEXT NOT NULL,   -- ubicación/id real de la imagen
-    diskmb_size           INTEGER NOT NULL,  -- verificar con flavor
+    diskmb_size             INTEGER NOT NULL,  -- verificar con flavor
     contador_refs           INTEGER NOT NULL DEFAULT 0,
     estado                  TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (estado IN ('ACTIVE', 'DEPRECATED', 'DELETED'))
 );

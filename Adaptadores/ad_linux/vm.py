@@ -4,6 +4,7 @@ import hashlib
 import json
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from contracts.adapter import AdapterActionInput
@@ -148,6 +149,135 @@ def delete_vm(request: AdapterActionInput) -> dict:
 
     already_absent = not was_running and not had_overlay
     return {"_already_absent": already_absent}
+
+
+def _resize_flavor(params: dict, key: str) -> tuple[int, int, int]:
+    flavor = params.get(key)
+    if not isinstance(flavor, dict):
+        raise NonRetryableError("VM_PARAMS_INCOMPLETE")
+    try:
+        values = (int(flavor["vcpu"]), int(flavor["ram_mb"]), int(flavor["disk_mb"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise NonRetryableError("VM_PARAMS_INCOMPLETE") from exc
+    if any(value <= 0 for value in values):
+        raise NonRetryableError("VM_PARAMS_INVALID")
+    return values
+
+
+def _memory_mib(element: ET.Element | None) -> int:
+    if element is None or element.text is None:
+        raise NonRetryableError("DOMAIN_XML_INVALID")
+    units = {"b": 1, "bytes": 1, "kib": 1024, "kb": 1000, "mib": 1024**2, "mb": 1000**2, "gib": 1024**3, "gb": 1000**3}
+    unit = element.get("unit", "KiB").lower()
+    if unit not in units:
+        raise NonRetryableError("DOMAIN_XML_INVALID")
+    try:
+        byte_count = int(element.text) * units[unit]
+    except ValueError as exc:
+        raise NonRetryableError("DOMAIN_XML_INVALID") from exc
+    if byte_count % (1024**2):
+        raise NonRetryableError("DOMAIN_XML_INVALID")
+    return byte_count // (1024**2)
+
+
+def _domain_resources(xml: str) -> tuple[int, int, int, int | None]:
+    try:
+        root = ET.fromstring(xml)
+        cpu = root.find("vcpu")
+        if cpu is None or cpu.text is None:
+            raise NonRetryableError("DOMAIN_XML_INVALID")
+        maximum_cpu = int(cpu.text)
+        current_cpu = int(cpu.get("current", cpu.text))
+        memory = root.find("currentMemory")
+        if memory is None:
+            memory = root.find("memory")
+        current_memory = _memory_mib(memory)
+        max_memory_element = root.find("maxMemory")
+        max_memory = _memory_mib(max_memory_element) if max_memory_element is not None else None
+    except (ET.ParseError, ValueError) as exc:
+        raise NonRetryableError("DOMAIN_XML_INVALID") from exc
+    return current_cpu, current_memory, maximum_cpu, max_memory
+
+
+def _define_existing_xml(address: str, vm_name: str, xml: str) -> None:
+    remote = f"/tmp/ad-libvirt-resize-{vm_name}.xml"
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".xml", delete=False) as file:
+        file.write(xml)
+        local = Path(file.name)
+    try:
+        host.upload(address, local, remote)
+        libvirt_vm._virsh(address, "define", remote)
+    finally:
+        local.unlink(missing_ok=True)
+        host.run(address, ["rm", "-f", remote])
+
+
+def resize_vm(request: AdapterActionInput) -> dict:
+    if config.VM_BACKEND != "libvirt":
+        raise NonRetryableError("LIBVIRT_REQUIRED")
+    address = _require_host(request).management_ip
+    params = request.action.params
+    before = _resize_flavor(params, "before_flavor")
+    after = _resize_flavor(params, "flavor")
+    hot_resize = params.get("hot_resize", False)
+    if not isinstance(hot_resize, bool):
+        raise NonRetryableError("VM_PARAMS_INVALID")
+    if after[2] < before[2]:
+        raise NonRetryableError("DISK_SHRINK")
+    vm_id = str(request.action.target.id)
+    vm_name = "vm-" + vm_id[:8]
+    overlay = str(config.STORAGE_ROOT / "overlay" / f"{vm_id}.qcow2")
+    virsh = libvirt_vm._virsh
+    state = virsh(address, "domstate", vm_name).strip()
+    running = state == "running"
+    if state not in {"running", "shut off"}:
+        raise NonRetryableError("VM_STATE_INVALID", state)
+    persistent_xml = virsh(address, "dumpxml", vm_name, "--inactive")
+    persistent = _domain_resources(persistent_xml)
+    live = _domain_resources(virsh(address, "dumpxml", vm_name)) if running else None
+    info = json.loads(host.run(address, ["qemu-img", "info", "--force-share", "--output=json", overlay]))
+    virtual_size = int(info["virtual-size"])
+    target_size = after[2] * 1024 * 1024
+    if virtual_size > target_size:
+        raise NonRetryableError("DISK_SHRINK")
+    if before[2] == after[2] and virtual_size != target_size:
+        raise NonRetryableError("DISK_SIZE_MISMATCH")
+    path = "hot" if hot_resize and before[2] == after[2] else "cold"
+    facts = {"state": "RUNNING", "path": path, "vcpu": after[0], "ram_mb": after[1], "disk_mb": after[2]}
+    if running and live is not None and live[:2] == after[:2] and persistent[:2] == after[:2] and virtual_size == target_size:
+        return {**facts, "_already_existed": True}
+
+    if path == "hot":
+        if not running or live is None:
+            raise NonRetryableError("VM_STATE_INVALID", state)
+        if any(resources[2] < after[0] or resources[3] is None or resources[3] < after[1] for resources in (live, persistent)):
+            raise NonRetryableError("HOT_HEADROOM_MISSING")
+        virsh(address, "setvcpus", vm_name, str(after[0]), "--live", "--config")
+        virsh(address, "setmem", vm_name, f"{after[1]}M", "--live", "--config")
+    else:
+        _stop_vm(address, vm_name)
+        if virsh(address, "domstate", vm_name).strip() != "shut off":
+            raise RetryableError("VM_STILL_RUNNING", vm_name)
+        if virtual_size < target_size:
+            host.run(address, ["qemu-img", "resize", overlay, f"{after[2]}M"])
+        if persistent[2] < after[0]:
+            virsh(address, "setvcpus", vm_name, str(after[0]), "--maximum", "--config")
+        virsh(address, "setvcpus", vm_name, str(after[0]), "--config")
+        root = ET.fromstring(persistent_xml)
+        maximum_memory = _memory_mib(root.find("memory"))
+        if maximum_memory < after[1]:
+            virsh(address, "setmaxmem", vm_name, f"{after[1]}M", "--config")
+        virsh(address, "setmem", vm_name, f"{after[1]}M", "--config")
+        _define_existing_xml(address, vm_name, virsh(address, "dumpxml", vm_name, "--inactive"))
+        virsh(address, "start", vm_name)
+    if virsh(address, "domstate", vm_name).strip() != "running":
+        raise RetryableError("QEMU_START_FAILED", vm_name)
+    final_live = _domain_resources(virsh(address, "dumpxml", vm_name))
+    final_config = _domain_resources(virsh(address, "dumpxml", vm_name, "--inactive"))
+    final_disk = json.loads(host.run(address, ["qemu-img", "info", "--force-share", "--output=json", overlay]))
+    if final_live[:2] != after[:2] or final_config[:2] != after[:2] or int(final_disk["virtual-size"]) != target_size:
+        raise RetryableError("RESIZE_NOT_APPLIED", vm_name)
+    return facts
 
 
 def _exists(address: str, path: str) -> bool:

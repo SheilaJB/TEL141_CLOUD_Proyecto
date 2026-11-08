@@ -20,6 +20,7 @@ _HANDLERS: dict[ActionOp, Handler] = {
     ActionOp.DETACH_PORT: handlers.detach_port,
     ActionOp.CREATE_VM: handlers.create_vm,
     ActionOp.DELETE_VM: handlers.delete_vm,
+    ActionOp.RESIZE_VM: handlers.resize_vm,
     ActionOp.DESTROY_SLICE_HOST: handlers.destroy_slice_host,
 }
 _ALLOWED_FACTS = {
@@ -33,6 +34,10 @@ _ALLOWED_FACTS = {
     "veth_names",
     "destroyed_vms",
     "destroyed_bridge",
+    "path",
+    "vcpu",
+    "ram_mb",
+    "disk_mb",
 }
 
 
@@ -96,6 +101,10 @@ async def create_vm(request: AdapterActionInput) -> AdapterActionOutput:
 async def delete_vm(request: AdapterActionInput) -> AdapterActionOutput:
     return await _dispatch_async(request, ActionOp.DELETE_VM)
 
+@activity.defn(name="resize_vm")
+async def resize_vm(request: AdapterActionInput) -> AdapterActionOutput:
+    return await _dispatch_async(request, ActionOp.RESIZE_VM)
+
 @activity.defn(name="destroy_slice_host")
 async def destroy_slice_host(request: AdapterActionInput) -> AdapterActionOutput:
     return await _dispatch_async(request, ActionOp.DESTROY_SLICE_HOST)
@@ -114,5 +123,6 @@ ADAPTER_ACTIVITIES = [
     detach_port,
     create_vm,
     delete_vm,
+    resize_vm,
     destroy_slice_host,
 ]

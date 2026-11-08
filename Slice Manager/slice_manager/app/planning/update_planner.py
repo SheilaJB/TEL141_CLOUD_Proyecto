@@ -4,6 +4,7 @@ from uuid import UUID
 
 from contracts.plan import (
     Action,
+    ActionOp,
     DeploymentPlan,
     Disruption,
     Intent,
@@ -560,6 +561,14 @@ def build_update_plan(inputs: UpdateInputs) -> DeploymentPlan:
 
     for vm_name, create_id in create_vm_ids.items():
         builder.depend(create_id, *vm_attach_ids.get(vm_name, ()))
+
+    network_additions = [
+        action.id for action in builder.actions
+        if action.op in {ActionOp.CREATE_LINK, ActionOp.ATTACH_PORT}
+    ]
+    for action in builder.actions:
+        if action.op == ActionOp.DELETE_LINK:
+            builder.depend(action.id, *network_additions)
 
     intents = builder.build_intents()
     ordered_rounds, point_of_no_return = order_rounds(builder.actions, builder.dependencies)

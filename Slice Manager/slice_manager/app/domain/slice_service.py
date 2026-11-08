@@ -23,6 +23,7 @@ from contracts.registry import (
 from contracts.servers import ServerHost
 from slice_manager.app.config import Settings
 from slice_manager.app.domain.capabilities import load_capabilities
+from slice_manager.app.domain.update_inputs import load_update_inputs
 from slice_manager.app.domain.errors import (
     AccessDeniedError,
     ConflictError,
@@ -36,8 +37,11 @@ from slice_manager.app.planning import (
     build_destroy_plan,
     build_initial_deploy_plan,
 )
-from slice_manager.app.planning.definition import parse_definition
+from slice_manager.app.planning.common import validate_definition
+from slice_manager.app.planning.definition import SliceDefinition, parse_definition
+from slice_manager.app.planning.update_planner import build_update_plan
 from slice_manager.app.repositories.deployments import DeploymentRepository
+from slice_manager.app.repositories.slices import SliceRepository
 
 logger = logging.getLogger(__name__)
 
@@ -254,12 +258,27 @@ class SliceService:
                 ) from exc
         return created
 
+    def update_plan_factory(
+        self, desired: SliceDefinition
+    ) -> Callable[[asyncpg.Connection, asyncpg.Record, int], Awaitable[DeploymentPlan]]:
+        async def plan_factory(
+            connection: asyncpg.Connection, context: asyncpg.Record, deployment_id: int
+        ) -> DeploymentPlan:
+            inputs = await load_update_inputs(
+                connection, self._repository, context, deployment_id, desired,
+                self._settings.capabilities_dir,
+            )
+            return build_update_plan(inputs)
+
+        return plan_factory
+
     async def request_update(
         self,
         *,
         slice_id: int,
         version_number: int,
         requester_id: int,
+        desired: SliceDefinition,
         plan_factory: Callable[
             [asyncpg.Connection, asyncpg.Record, int], Awaitable[DeploymentPlan]
         ],
@@ -267,7 +286,7 @@ class SliceService:
         """Crea el deployment UPDATE, sus filas PENDING (P52) y arranca UpdateWorkflow.
 
         `plan_factory(connection, context, deployment_id)` construye el plan con el scope
-        `deployment:{id}` y los IDs existentes (P42); el loader de la IR actual queda pendiente.
+        `deployment:{id}` y los IDs existentes (P42).
         """
         if not self._settings.internal_service_token:
             raise WorkflowUnavailableError(
@@ -319,6 +338,13 @@ class SliceService:
                         "the user's service level is not allowed in this availability zone"
                     )
 
+                validate_definition(desired)
+                if not await SliceRepository().update_version_spec(
+                    connection,
+                    version_id=context["version_id"],
+                    spec=desired.model_dump(mode="json"),
+                ):
+                    raise ConflictError("the target slice version is no longer editable")
                 deployment_id = await self._repository.reserve_deployment_id(connection)
                 plan = await plan_factory(connection, context, deployment_id)
                 if plan.type != PlanType.UPDATE:

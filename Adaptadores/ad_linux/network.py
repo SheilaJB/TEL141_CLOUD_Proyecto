@@ -12,6 +12,7 @@ Modelo:
 
 import hashlib
 import ipaddress
+import json
 import threading
 
 from contracts.adapter import AdapterActionInput, AdapterHost
@@ -39,6 +40,15 @@ def _param(request: AdapterActionInput, name: str):
     return request.action.params.get(name)
 
 
+def _publico(request: AdapterActionInput) -> bool:
+    if "publico" not in request.action.params:
+        raise NonRetryableError("PUBLICO_MISSING")
+    value = request.action.params["publico"]
+    if not isinstance(value, bool):
+        raise NonRetryableError("PUBLICO_INVALID")
+    return value
+
+
 def _tap_name(port_id: str) -> str:
     return "tp-" + hashlib.sha1(port_id.encode()).hexdigest()[:10]
 
@@ -57,6 +67,11 @@ def _link_exists(ip: str, name: str) -> bool:
         return True
     except RuntimeError:
         return False
+
+
+def _link_exists_checked(ip: str, name: str) -> bool:
+    links = json.loads(host.run(ip, ["ip", "-j", "link", "show"]))
+    return any(link.get("ifname") == name for link in links)
 
 
 def _ensure_provider(ip: str) -> None:
@@ -156,30 +171,27 @@ def attach_port(request: AdapterActionInput) -> dict:
     return {"tap_names": [tap], "_already_existed": already_existed}
 
 def detach_port(request: AdapterActionInput) -> dict:
+    publico = _publico(request)
     target = _require_host(request.host)
     ip = target.management_ip
     port_id = _param(request, "port_id") or str(request.action.target.id)
     tap = _tap_name(str(port_id))
-    bridge = PROVIDER_BRIDGE if _param(request, "publico") else f"br-sl-{request.slice_id}"
+    bridge = PROVIDER_BRIDGE if publico else f"br-sl-{request.slice_id}"
 
-    existed = _link_exists(ip, tap)
+    existed = _link_exists_checked(ip, tap)
     host.run(ip, ["ovs-vsctl", "--if-exists", "del-port", bridge, tap])
     host.run(ip, ["ovs-vsctl", "--if-exists", "del-port", tap])
     if existed:
-        try:
-            host.run(ip, ["ip", "link", "del", tap])
-        except RuntimeError:
-            pass
+        host.run(ip, ["ip", "link", "del", tap])
     return {"tap_names": [], "_already_absent": not existed}
 
 
 def delete_link(request: AdapterActionInput) -> dict:
+    publico = _publico(request)
     targets = request.hosts or ([request.host] if request.host else [])
     if not targets:
-        raise NonRetryableError("HOSTS_MISSING")
+        return {"tap_names": [], "_already_absent": True}
     slice_id = request.slice_id
-    params = request.action.params
-    publico = bool((params.get("network") or {}).get("publico"))
 
     if publico:
         return {"tap_names": []}
@@ -192,21 +204,18 @@ def delete_link(request: AdapterActionInput) -> dict:
         _validate_host(target)
         ip = target.management_ip
         with _trunk_lock(ip, slice_id):
+            bridges = host.run(ip, ["ovs-vsctl", "list-br"]).splitlines()
+            if bridge not in bridges:
+                continue
+            ports_raw = host.run(ip, ["ovs-vsctl", "list-ports", bridge])
+            remaining = [p.strip() for p in ports_raw.splitlines() if p.strip()]
+            if any(port not in (vx, vw) for port in remaining):
+                continue
             host.run(ip, ["ovs-vsctl", "--if-exists", "del-port", PROVIDER_BRIDGE, vw])
             host.run(ip, ["ovs-vsctl", "--if-exists", "del-port", bridge, vx])
-            if _link_exists(ip, vx):
-                try:
-                    host.run(ip, ["ip", "link", "del", vx])
-                except RuntimeError:
-                    pass
-            try:
-                ports_raw = host.run(ip, ["ovs-vsctl", "list-ports", bridge])
-                remaining = [p.strip() for p in ports_raw.splitlines() if p.strip()]
-            except RuntimeError:
-                remaining = []
-            remaining_non_trunk = [p for p in remaining if p not in (vx, vw)]
-            if not remaining_non_trunk:
-                host.run(ip, ["ovs-vsctl", "--if-exists", "del-br", bridge])
+            if _link_exists_checked(ip, vx):
+                host.run(ip, ["ip", "link", "del", vx])
+            host.run(ip, ["ovs-vsctl", "--if-exists", "del-br", bridge])
 
     return {"tap_names": []}
 

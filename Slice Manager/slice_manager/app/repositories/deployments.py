@@ -14,6 +14,7 @@ from contracts.registry import (
     RoundFacts,
     RoundFactsResult,
     SliceRuntime,
+    SliceRuntimeLink,
     SliceRuntimeNode,
     SliceRuntimePort,
 )
@@ -167,26 +168,29 @@ class DeploymentRepository:
         )
 
     async def load_catalog(
-        self, connection: asyncpg.Connection, cluster_id: int
+        self, connection: asyncpg.Connection, cluster_id: int, *, include_inactive: bool = False
     ) -> tuple[dict[str, CatalogFlavor], dict[str, CatalogImage]]:
         flavor_rows = await connection.fetch(
             """
-            SELECT id, name, vcpu, vram_mb, vdisk_mb
+            SELECT id, name, vcpu, vram_mb, vdisk_mb, activo
             FROM slices.flavor
-            WHERE activo = TRUE
+            WHERE activo = TRUE OR $1
             ORDER BY name
-            """
+            """,
+            include_inactive,
         )
         image_rows = await connection.fetch(
             """
-            SELECT i.id, i.nombre, i.ruta_referencia, c.nombre AS cluster_name, i.diskmb_size
+            SELECT i.id, i.nombre, i.ruta_referencia, c.nombre AS cluster_name,
+                   i.diskmb_size, i.estado
             FROM slices.image AS i
             LEFT JOIN slices.cluster AS c ON c.id = i.cluster_compatible
-            WHERE i.estado = 'ACTIVE'
+            WHERE (i.estado = 'ACTIVE' OR $2)
               AND (i.cluster_compatible IS NULL OR i.cluster_compatible = $1)
             ORDER BY i.nombre
             """,
             cluster_id,
+            include_inactive,
         )
         flavors = {
             row["name"]: CatalogFlavor(
@@ -195,6 +199,7 @@ class DeploymentRepository:
                 ram_mb=row["vram_mb"],
                 disk_mb=row["vdisk_mb"],
                 catalog_id=row["id"],
+                active=row["activo"],
             )
             for row in flavor_rows
         }
@@ -205,6 +210,7 @@ class DeploymentRepository:
                 disk_size=row["diskmb_size"],
                 catalog_id=row["id"],
                 cluster_compatible=row["cluster_name"],
+                active=row["estado"] == "ACTIVE",
             )
             for row in image_rows
         }
@@ -499,6 +505,45 @@ class DeploymentRepository:
             slice_id,
         )
 
+    async def load_update_inventory(
+        self, connection: asyncpg.Connection, slice_id: int
+    ) -> tuple[asyncpg.Record | None, list[asyncpg.Record], list[asyncpg.Record], list[asyncpg.Record]]:
+        origin = await connection.fetchrow(
+            """
+            SELECT v.spec FROM slices.slice AS s
+            JOIN slices.slice_version AS v ON v.id = s.version_activa_id
+            WHERE s.id = $1 AND v.slice_id = s.id AND v.estado_version = 'ACTIVE'
+            """,
+            slice_id,
+        )
+        nodes = await connection.fetch(
+            """
+            SELECT id, name FROM slices.slice_nodo
+            WHERE slice_id = $1 AND estado_nodo <> 'DELETED'
+            ORDER BY name, id
+            """,
+            slice_id,
+        )
+        links = await connection.fetch(
+            """
+            SELECT id, name, public, cidr::text AS cidr FROM slices.slice_enlace
+            WHERE slice_id = $1 AND estado <> 'DELETED'
+            ORDER BY name, id
+            """,
+            slice_id,
+        )
+        ports = await connection.fetch(
+            """
+            SELECT p.id, p.enlace_id, p.nodo_id, p.public
+            FROM slices.slice_enlace_puerto AS p
+            JOIN slices.slice_enlace AS e ON e.id = p.enlace_id
+            WHERE e.slice_id = $1 AND e.estado <> 'DELETED' AND p.estado <> 'DELETED'
+            ORDER BY p.id
+            """,
+            slice_id,
+        )
+        return origin, nodes, links, ports
+
     async def create_update_deployment(
         self,
         connection: asyncpg.Connection,
@@ -733,6 +778,14 @@ class DeploymentRepository:
             slice_id,
             filter_ids,
         )
+        link_rows = await connection.fetch(
+            """
+            SELECT id, public FROM slices.slice_enlace
+            WHERE slice_id = $1 AND estado <> 'DELETED'
+            ORDER BY id
+            """,
+            slice_id,
+        )
         return SliceRuntime(
             slice_id=slice_id,
             public_vid=slice_row["vlan_stag"],
@@ -758,6 +811,10 @@ class DeploymentRepository:
                     vlan_ctag=row["vlan_ctag"],
                 )
                 for row in port_rows
+            ],
+            links=[
+                SliceRuntimeLink(link_id=row["id"], public=row["public"])
+                for row in link_rows
             ],
         )
 

@@ -293,6 +293,7 @@ def resize_vm_action(
     node_id: UUID,
     before_flavor: CatalogFlavor,
     flavor: CatalogFlavor,
+    hot_resize: bool = False,
 ) -> Action:
     return _vm_op_action(
         ActionOp.RESIZE_VM,
@@ -302,6 +303,7 @@ def resize_vm_action(
         params={
             RESIZE_BEFORE_KEY: _flavor_params(before_flavor),
             RESIZE_AFTER_KEY: _flavor_params(flavor),
+            "hot_resize": hot_resize,
         },
         after={"flavor_ref": flavor.name},
     )

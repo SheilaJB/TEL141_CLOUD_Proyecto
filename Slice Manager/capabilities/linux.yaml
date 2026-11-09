@@ -4,7 +4,7 @@ supports:
   apply_security_rules: false    # [OPEN] R5
 
   # --- Update (P45) ---
-  hot_resize: false
+  hot_resize: true
   stop_start: false
-  hot_attach_port: false
-  hot_detach_port: false
+  hot_attach_port: true
+  hot_detach_port: true

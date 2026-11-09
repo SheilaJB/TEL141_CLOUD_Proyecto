@@ -505,6 +505,21 @@ class DeploymentRepository:
             slice_id,
         )
 
+    async def has_stopped_nodes(
+        self, connection: asyncpg.Connection, slice_id: int
+    ) -> bool:
+        return await connection.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM slices.slice_nodo
+                WHERE slice_id = $1
+                  AND estado_nodo = 'STOPPED'
+                  AND estado_nodo <> 'DELETED'
+            )
+            """,
+            slice_id,
+        )
+
     async def load_update_inventory(
         self, connection: asyncpg.Connection, slice_id: int
     ) -> tuple[asyncpg.Record | None, list[asyncpg.Record], list[asyncpg.Record], list[asyncpg.Record]]:

@@ -12,17 +12,22 @@ Modelo:
 
 import hashlib
 import ipaddress
+import base64
 import json
+import re
 import threading
+import time
 
 from contracts.adapter import AdapterActionInput, AdapterHost
 
-from . import config, host
-from .errors import NonRetryableError
+from . import config, host, libvirt_vm
+from .cloudinit import render_network_config
+from .errors import NonRetryableError, RetryableError
 
 PROVIDER_BRIDGE = "br-provider"
 STAG_MIN = 100
 STAG_MAX = 3999  # 4000 reservado para trafico publico
+GUEST_COMMAND_TIMEOUT_S = 30
 
 
 _trunk_locks: dict[tuple[str, str], threading.Lock] = {}
@@ -72,6 +77,164 @@ def _link_exists(ip: str, name: str) -> bool:
 def _link_exists_checked(ip: str, name: str) -> bool:
     links = json.loads(host.run(ip, ["ip", "-j", "link", "show"]))
     return any(link.get("ifname") == name for link in links)
+
+
+def _guest_mode(request: AdapterActionInput, *, attach: bool) -> str:
+    mode = _param(request, "guest")
+    if mode is None and attach:
+        return "prepare"
+    if mode not in {"prepare", "cleanup", "live"}:
+        raise NonRetryableError("GUEST_MODE_INVALID")
+    if (attach and mode == "cleanup") or (not attach and mode == "prepare"):
+        raise NonRetryableError("GUEST_MODE_INVALID")
+    return mode
+
+
+def _domain_for_port(request: AdapterActionInput) -> str:
+    node_id = request.action.target.node_id
+    if node_id is None:
+        raise NonRetryableError("PORT_PARAMS_MISSING")
+    return "vm-" + str(node_id)[:8]
+
+
+def _require_guest_mode_state(
+    address: str, vm_name: str, mode: str
+) -> bool:
+    exists = libvirt_vm.domain_exists(address, vm_name)
+    if mode in {"prepare", "cleanup"}:
+        if exists:
+            raise NonRetryableError("GUEST_MODE_MISMATCH")
+        return False
+    if not exists or libvirt_vm._virsh(address, "domstate", vm_name).strip() != "running":
+        raise NonRetryableError("VM_STATE_INVALID")
+    return True
+
+
+def _guest_agent_command(
+    address: str, vm_name: str, execute: str, arguments: dict | None = None
+) -> dict:
+    payload: dict[str, object] = {"execute": execute}
+    if arguments is not None:
+        payload["arguments"] = arguments
+    raw = libvirt_vm._virsh(
+        address, "qemu-agent-command", vm_name, json.dumps(payload)
+    )
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise NonRetryableError("GUEST_AGENT_RESPONSE_INVALID") from exc
+    if not isinstance(result, dict) or "error" in result:
+        raise NonRetryableError("GUEST_AGENT_COMMAND_FAILED")
+    value = result.get("return")
+    if not isinstance(value, dict):
+        return {}
+    return value
+
+
+def _guest_exec(
+    address: str,
+    vm_name: str,
+    path: str,
+    arguments: list[str] | None = None,
+    *,
+    allow_failure: bool = False,
+) -> tuple[int, str]:
+    result = _guest_agent_command(
+        address,
+        vm_name,
+        "guest-exec",
+        {
+            "path": path,
+            "arg": arguments or [],
+            "capture-output": True,
+        },
+    )
+    process_id = result.get("pid")
+    if not isinstance(process_id, int):
+        raise NonRetryableError("GUEST_AGENT_RESPONSE_INVALID")
+    deadline = time.monotonic() + GUEST_COMMAND_TIMEOUT_S
+    while time.monotonic() < deadline:
+        status = _guest_agent_command(
+            address, vm_name, "guest-exec-status", {"pid": process_id}
+        )
+        if status.get("exited"):
+            exit_code = status.get("exitcode")
+            if not isinstance(exit_code, int):
+                raise NonRetryableError("GUEST_AGENT_RESPONSE_INVALID")
+            output = status.get("out-data", "")
+            try:
+                decoded = base64.b64decode(output).decode("utf-8", errors="replace")
+                error_output = base64.b64decode(
+                    status.get("err-data", "")
+                ).decode("utf-8", errors="replace")
+            except (ValueError, TypeError) as exc:
+                raise NonRetryableError("GUEST_AGENT_RESPONSE_INVALID") from exc
+            if exit_code != 0 and not allow_failure:
+                raise NonRetryableError(
+                    "GUEST_COMMAND_FAILED", (error_output or decoded)[:500]
+                )
+            return exit_code, decoded
+        time.sleep(0.2)
+    raise RetryableError("GUEST_COMMAND_TIMEOUT")
+
+
+def _guest_ping(address: str, vm_name: str) -> None:
+    _guest_agent_command(address, vm_name, "guest-ping")
+
+
+def _hot_netplan_path(mac: str) -> str:
+    normalized = re.sub(r"[:-]", "", mac).lower()
+    if not re.fullmatch(r"[0-9a-f]{12}", normalized):
+        raise NonRetryableError("NIC_INCOMPLETE")
+    return f"/etc/netplan/90-hot-{normalized}.yaml"
+
+
+def _guest_read_file(address: str, vm_name: str, path: str) -> str | None:
+    script = (
+        "import pathlib,sys; p=pathlib.Path(sys.argv[1]); "
+        "sys.exit(44) if not p.exists() else sys.stdout.write(p.read_text())"
+    )
+    code, content = _guest_exec(
+        address, vm_name, "/usr/bin/python3", ["-c", script, path],
+        allow_failure=True,
+    )
+    if code == 44:
+        return None
+    if code != 0:
+        raise NonRetryableError("GUEST_COMMAND_FAILED", content[:500])
+    return content
+
+
+def _guest_write_file(address: str, vm_name: str, path: str, content: str) -> None:
+    script = (
+        "import base64,pathlib,sys; p=pathlib.Path(sys.argv[1]); "
+        "tmp=p.with_suffix(p.suffix+'.tmp'); "
+        "tmp.write_bytes(base64.b64decode(sys.argv[2])); tmp.replace(p)"
+    )
+    _guest_exec(
+        address,
+        vm_name,
+        "/usr/bin/python3",
+        ["-c", script, path, base64.b64encode(content.encode()).decode()],
+    )
+
+
+def _guest_remove_file(address: str, vm_name: str, path: str) -> None:
+    script = "import pathlib,sys; pathlib.Path(sys.argv[1]).unlink(missing_ok=True)"
+    _guest_exec(address, vm_name, "/usr/bin/python3", ["-c", script, path])
+
+
+def _run_netplan(address: str, vm_name: str, operation: str) -> None:
+    _guest_exec(address, vm_name, "/usr/sbin/netplan", [operation])
+
+
+def _remove_tap(ip: str, bridge: str, tap: str) -> bool:
+    existed = _link_exists_checked(ip, tap)
+    host.run(ip, ["ovs-vsctl", "--if-exists", "del-port", bridge, tap])
+    host.run(ip, ["ovs-vsctl", "--if-exists", "del-port", tap])
+    if existed:
+        host.run(ip, ["ip", "link", "del", tap])
+    return existed
 
 
 def _ensure_provider(ip: str) -> None:
@@ -152,6 +315,33 @@ def attach_port(request: AdapterActionInput) -> dict:
     ip = target.management_ip
     port_id = _param(request, "port_id") or str(request.action.target.id)
     tap = _tap_name(str(port_id))
+    vm_name = _domain_for_port(request)
+    mode = _guest_mode(request, attach=True)
+    is_live = _require_guest_mode_state(ip, vm_name, mode)
+    nic: dict | None = None
+    mac = ""
+    netplan_path = ""
+    netplan_contents = ""
+    interfaces: dict[str, str] = {}
+    existing_contents: str | None = None
+    if is_live:
+        network = _param(request, "network")
+        if not isinstance(network, dict):
+            raise NonRetryableError("PORT_PARAMS_MISSING")
+        nic = dict(network)
+        nic["publico"] = bool(_param(request, "publico"))
+        mac = str(nic.get("mac") or "")
+        netplan_path = _hot_netplan_path(mac)
+        netplan_contents = render_network_config([nic])
+        interfaces = libvirt_vm.domain_interfaces(
+            libvirt_vm._virsh(ip, "dumpxml", vm_name)
+        )
+        if tap in interfaces and interfaces[tap].lower() != mac.lower():
+            raise NonRetryableError("TAP_DOMAIN_CONFLICT")
+        _guest_ping(ip, vm_name)
+        existing_contents = _guest_read_file(ip, vm_name, netplan_path)
+        if existing_contents is not None and existing_contents != netplan_contents:
+            raise NonRetryableError("NETPLAN_FILE_CONFLICT")
     if _param(request, "publico"):
         _ensure_provider(ip)
         bridge = PROVIDER_BRIDGE
@@ -162,12 +352,54 @@ def attach_port(request: AdapterActionInput) -> dict:
             raise NonRetryableError("PORT_PARAMS_MISSING")
         bridge = _ensure_slice_bridge(ip, request.slice_id)
         tag = str(vlan)
-    already_existed = _link_exists(ip, tap)
+    already_existed = _link_exists_checked(ip, tap)
     if not already_existed:
         host.run(ip, ["ip", "tuntap", "add", "dev", tap, "mode", "tap"])
     host.run(ip, ["ovs-vsctl", "--may-exist", "add-port", bridge, tap])
     host.run(ip, ["ovs-vsctl", "set", "port", tap, "tag=" + tag])
     host.run(ip, ["ip", "link", "set", tap, "up"])
+
+    if mode == "prepare":
+        return {"tap_names": [tap], "_already_existed": already_existed}
+    if interfaces.get(tap, "").lower() == mac.lower() and existing_contents == netplan_contents:
+        return {"tap_names": [tap], "_already_existed": True}
+
+    write_attempted = existing_contents is None
+    try:
+        if tap not in interfaces:
+            libvirt_vm.change_device(
+                ip,
+                vm_name,
+                libvirt_vm.interface_xml(port_id=str(port_id), mac=mac),
+                attach=True,
+            )
+        if write_attempted:
+            _guest_write_file(ip, vm_name, netplan_path, netplan_contents)
+        _run_netplan(ip, vm_name, "generate")
+        _run_netplan(ip, vm_name, "apply")
+    except Exception as exc:
+        try:
+            current = libvirt_vm.domain_interfaces(
+                libvirt_vm._virsh(ip, "dumpxml", vm_name)
+            )
+            if tap in current:
+                libvirt_vm.change_device(
+                    ip,
+                    vm_name,
+                    libvirt_vm.interface_xml(
+                        port_id=str(port_id), mac=current[tap]
+                    ),
+                    attach=False,
+                )
+            if write_attempted:
+                _guest_remove_file(ip, vm_name, netplan_path)
+                _run_netplan(ip, vm_name, "generate")
+                _run_netplan(ip, vm_name, "apply")
+        except Exception as rollback_error:
+            raise RetryableError(
+                "HOT_ATTACH_ROLLBACK_FAILED", str(rollback_error)[:500]
+            ) from rollback_error
+        raise
     return {"tap_names": [tap], "_already_existed": already_existed}
 
 def detach_port(request: AdapterActionInput) -> dict:
@@ -177,13 +409,35 @@ def detach_port(request: AdapterActionInput) -> dict:
     port_id = _param(request, "port_id") or str(request.action.target.id)
     tap = _tap_name(str(port_id))
     bridge = PROVIDER_BRIDGE if publico else f"br-sl-{request.slice_id}"
+    vm_name = _domain_for_port(request)
+    mode = _guest_mode(request, attach=False)
+    _require_guest_mode_state(ip, vm_name, mode)
 
-    existed = _link_exists_checked(ip, tap)
-    host.run(ip, ["ovs-vsctl", "--if-exists", "del-port", bridge, tap])
-    host.run(ip, ["ovs-vsctl", "--if-exists", "del-port", tap])
-    if existed:
-        host.run(ip, ["ip", "link", "del", tap])
-    return {"tap_names": [], "_already_absent": not existed}
+    if mode == "cleanup":
+        existed = _remove_tap(ip, bridge, tap)
+        return {"tap_names": [], "_already_absent": not existed}
+
+    interfaces = libvirt_vm.domain_interfaces(
+        libvirt_vm._virsh(ip, "dumpxml", vm_name)
+    )
+    mac = interfaces.get(tap)
+    tap_existed = _link_exists_checked(ip, tap)
+    if mac is None:
+        _remove_tap(ip, bridge, tap)
+        return {"tap_names": [], "_already_absent": not tap_existed}
+
+    _guest_ping(ip, vm_name)
+    netplan_path = _hot_netplan_path(mac)
+    _guest_remove_file(ip, vm_name, netplan_path)
+    _run_netplan(ip, vm_name, "apply")
+    libvirt_vm.change_device(
+        ip,
+        vm_name,
+        libvirt_vm.interface_xml(port_id=str(port_id), mac=mac),
+        attach=False,
+    )
+    _remove_tap(ip, bridge, tap)
+    return {"tap_names": []}
 
 
 def delete_link(request: AdapterActionInput) -> dict:

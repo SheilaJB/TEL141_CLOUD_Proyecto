@@ -113,9 +113,16 @@ class Action(ContractModel):
             and self.op in {ActionOp.CREATE_LINK, ActionOp.ATTACH_PORT}
             and self.params
         ):
-            raise ValueError(
-                f"{self.op.value} parameters must be empty in the frozen plan"
-            )
+            if self.op != ActionOp.ATTACH_PORT or set(self.params) != {"guest"}:
+                raise ValueError(
+                    f"{self.op.value} parameters must be empty in the frozen plan"
+                )
+        guest_mode = self.params.get("guest")
+        if guest_mode is not None and (
+            self.op not in {ActionOp.ATTACH_PORT, ActionOp.DETACH_PORT}
+            or guest_mode not in {"prepare", "cleanup", "live"}
+        ):
+            raise ValueError("guest mode is invalid for this action")
         return self
 
 

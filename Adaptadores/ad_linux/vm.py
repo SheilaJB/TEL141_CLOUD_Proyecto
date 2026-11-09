@@ -193,6 +193,8 @@ def _domain_resources(xml: str) -> tuple[int, int, int, int | None]:
             memory = root.find("memory")
         current_memory = _memory_mib(memory)
         max_memory_element = root.find("maxMemory")
+        if max_memory_element is None:
+            max_memory_element = root.find("memory")
         max_memory = _memory_mib(max_memory_element) if max_memory_element is not None else None
     except (ET.ParseError, ValueError) as exc:
         raise NonRetryableError("DOMAIN_XML_INVALID") from exc
@@ -224,6 +226,8 @@ def resize_vm(request: AdapterActionInput) -> dict:
         raise NonRetryableError("VM_PARAMS_INVALID")
     if after[2] < before[2]:
         raise NonRetryableError("DISK_SHRINK")
+    if after[0] > config.HEADROOM_VCPU_MAX or after[1] > config.HEADROOM_MEMORY_MAX_MB:
+        raise NonRetryableError("HOT_CEILING_EXCEEDED")
     vm_id = str(request.action.target.id)
     vm_name = "vm-" + vm_id[:8]
     overlay = str(config.STORAGE_ROOT / "overlay" / f"{vm_id}.qcow2")
@@ -348,6 +352,8 @@ def _ensure_seed(
     network = render_network_config(nics, cloud_init_net=True)
     user = (
         "#cloud-config\n"
+        "packages:\n"
+        "  - qemu-guest-agent\n"
         f"hostname: {hostname}\n"
         "users:\n"
         "  - default\n"

@@ -121,6 +121,8 @@ services:
       ORCHESTRATOR_INTERNAL_SERVICE_TOKEN: ${ORCHESTRATOR_INTERNAL_SERVICE_TOKEN}
       ORCHESTRATOR_CAPABILITIES_DIR: /app/capabilities
       APPROVAL_TIMEOUT_SECONDS: ${APPROVAL_TIMEOUT_SECONDS:-86400}
+      HEADROOM_VCPU_MAX: ${HEADROOM_VCPU_MAX:?HEADROOM_VCPU_MAX is required}
+      HEADROOM_MEMORY_MAX_MB: ${HEADROOM_MEMORY_MAX_MB:?HEADROOM_MEMORY_MAX_MB is required}
     networks: [backend]
 
   # Worker del orquestador
@@ -235,6 +237,8 @@ services:
       ADAPTER_RUN_ROOT: /home/ubuntu/run/vms
       ADAPTER_PUBLIC_VID: ${NETWORK_MANAGER_PUBLIC_VID:-4000}
       ADAPTER_VM_BACKEND: ${ADAPTER_VM_BACKEND:-libvirt}
+      HEADROOM_VCPU_MAX: ${HEADROOM_VCPU_MAX:?HEADROOM_VCPU_MAX is required}
+      HEADROOM_MEMORY_MAX_MB: ${HEADROOM_MEMORY_MAX_MB:?HEADROOM_MEMORY_MAX_MB is required}
     volumes:
       - ${ADAPTER_KEYS_DIR:-./Adaptadores/keys}:/run/adapter-keys:ro
     networks: [backend, adapter]

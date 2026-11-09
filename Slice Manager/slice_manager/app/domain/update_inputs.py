@@ -23,6 +23,36 @@ from slice_manager.app.planning.update_planner import (
 from slice_manager.app.repositories.deployments import DeploymentRepository
 
 
+def validate_update_headroom(
+    inputs: UpdateInputs, *, vcpu_max: int, memory_max_mb: int
+) -> None:
+    current_by_name = {vm.name: vm for vm in inputs.current.vms}
+    for desired in inputs.desired.vms:
+        target = inputs.flavors.get(desired.flavor)
+        if target is None:
+            raise ConflictError(f"flavor {desired.flavor!r} is missing from Update catalog")
+        current = current_by_name.get(desired.name)
+        if current is None:
+            if target.vcpu > vcpu_max or target.ram_mb > memory_max_mb:
+                raise ConflictError(
+                    f"new VM {desired.name!r} exceeds the hot-resize headroom ceiling"
+                )
+            continue
+        before = inputs.flavors.get(current.flavor)
+        if before is None:
+            raise ConflictError(
+                f"current flavor {current.flavor!r} is missing from Update catalog"
+            )
+        if (
+            target.vcpu > vcpu_max and target.vcpu > before.vcpu
+        ) or (
+            target.ram_mb > memory_max_mb and target.ram_mb > before.ram_mb
+        ):
+            raise ConflictError(
+                f"VM {desired.name!r} grows beyond the hot-resize headroom ceiling"
+            )
+
+
 async def load_update_inputs(
     connection: asyncpg.Connection,
     repository: DeploymentRepository,

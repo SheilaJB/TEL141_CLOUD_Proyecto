@@ -2,10 +2,11 @@
 
 import hashlib
 import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from xml.sax.saxutils import escape, quoteattr
 
-from . import host
+from . import config, host
 from .errors import NonRetryableError, RetryableError
 
 VIRSH = ["virsh", "-c", "qemu:///system"]
@@ -29,6 +30,58 @@ def _tap_name(port_id: str) -> str:
     return "tp-" + hashlib.sha1(port_id.encode()).hexdigest()[:10]
 
 
+def interface_xml(*, port_id: str, mac: str) -> str:
+    return (
+        "<interface type='ethernet'>\n"
+        f"  <mac address={quoteattr(mac)}/>\n"
+        f"  <target dev={quoteattr(_tap_name(port_id))} managed='no'/>\n"
+        "  <model type='virtio'/>\n"
+        "</interface>\n"
+    )
+
+
+def domain_exists(address: str, vm_name: str) -> bool:
+    names = _virsh(address, "list", "--all", "--name").splitlines()
+    return vm_name in names
+
+
+def domain_interfaces(xml: str) -> dict[str, str]:
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError as exc:
+        raise NonRetryableError("DOMAIN_XML_INVALID") from exc
+    result: dict[str, str] = {}
+    for interface in root.findall("./devices/interface"):
+        target = interface.find("target")
+        mac = interface.find("mac")
+        if target is not None and target.get("dev") and mac is not None and mac.get("address"):
+            result[target.get("dev", "")] = mac.get("address", "")
+    return result
+
+
+def change_device(
+    address: str, vm_name: str, xml: str, *, attach: bool
+) -> None:
+    operation = "attach" if attach else "detach"
+    remote = f"/tmp/ad-libvirt-{operation}-{vm_name}.xml"
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".xml", delete=False) as file:
+        file.write(xml)
+        local = Path(file.name)
+    try:
+        host.upload(address, local, remote)
+        _virsh(
+            address,
+            f"{operation}-device",
+            vm_name,
+            remote,
+            "--live",
+            "--config",
+        )
+    finally:
+        local.unlink(missing_ok=True)
+        host.run(address, ["rm", "-f", remote])
+
+
 def domain_xml(
     *,
     vm_name: str,
@@ -39,6 +92,8 @@ def domain_xml(
     ram_mb: int,
     vcpus: int,
     vnc_display: int,
+    max_memory_mb: int | None = None,
+    max_vcpus: int | None = None,
 ) -> str:
     disks = [
         "    <disk type='file' device='disk'>\n"
@@ -60,19 +115,19 @@ def domain_xml(
     for nic in nics:
         port_id = str(nic.get("port_id") or nic.get("id"))
         # type=ethernet + managed=no: usa el TAP que ya creo attach_port
-        interfaces.append(
-            "    <interface type='ethernet'>\n"
-            f"      <mac address={quoteattr(str(nic['mac']))}/>\n"
-            f"      <target dev={quoteattr(_tap_name(port_id))} managed='no'/>\n"
-            "      <model type='virtio'/>\n"
-            "    </interface>"
-        )
+        interface = interface_xml(port_id=port_id, mac=str(nic["mac"]))
+        interfaces.append("\n".join(f"    {line}" for line in interface.splitlines()))
+    memory_limit = max(ram_mb, max_memory_mb or config.HEADROOM_MEMORY_MAX_MB)
+    vcpu_limit = max(vcpus, max_vcpus or config.HEADROOM_VCPU_MAX)
     devices = "\n".join(
         [
             *disks,
             *interfaces,
             f"    <graphics type='vnc' port='{QEMU_VNC_BASE_PORT + vnc_display}' "
             "autoport='no' listen='0.0.0.0'/>",
+            "    <channel type='unix'>\n"
+            "      <target type='virtio' name='org.qemu.guest_agent.0'/>\n"
+            "    </channel>",
             "    <video>\n      <model type='vga'/>\n    </video>",
             "    <serial type='pty'/>",
             "    <console type='pty'/>",
@@ -82,8 +137,9 @@ def domain_xml(
         "<domain type='kvm'>\n"
         f"  <name>{escape(vm_name)}</name>\n"
         f"  <uuid>{escape(vm_id)}</uuid>\n"
-        f"  <memory unit='MiB'>{int(ram_mb)}</memory>\n"
-        f"  <vcpu>{int(vcpus)}</vcpu>\n"
+        f"  <memory unit='MiB'>{int(memory_limit)}</memory>\n"
+        f"  <currentMemory unit='MiB'>{int(ram_mb)}</currentMemory>\n"
+        f"  <vcpu placement='static' current='{int(vcpus)}'>{int(vcpu_limit)}</vcpu>\n"
         "  <os>\n    <type arch='x86_64'>hvm</type>\n    <boot dev='hd'/>\n  </os>\n"
         "  <features>\n    <acpi/>\n    <apic/>\n  </features>\n"
         "  <cpu mode='host-passthrough'/>\n"

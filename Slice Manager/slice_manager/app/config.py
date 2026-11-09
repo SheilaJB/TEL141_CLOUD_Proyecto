@@ -23,6 +23,10 @@ class Settings(BaseSettings):
         gt=0,
         validation_alias="APPROVAL_TIMEOUT_SECONDS",
     )
+    headroom_vcpu_max: int = Field(gt=0, validation_alias="HEADROOM_VCPU_MAX")
+    headroom_memory_max_mb: int = Field(
+        gt=0, validation_alias="HEADROOM_MEMORY_MAX_MB"
+    )
     workflow_recovery_interval_seconds: int = Field(default=30, gt=0)
     capabilities_dir: Path | None = None
 

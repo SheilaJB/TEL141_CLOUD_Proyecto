@@ -23,7 +23,10 @@ from contracts.registry import (
 from contracts.servers import ServerHost
 from slice_manager.app.config import Settings
 from slice_manager.app.domain.capabilities import load_capabilities
-from slice_manager.app.domain.update_inputs import load_update_inputs
+from slice_manager.app.domain.update_inputs import (
+    load_update_inputs,
+    validate_update_headroom,
+)
 from slice_manager.app.domain.errors import (
     AccessDeniedError,
     ConflictError,
@@ -268,6 +271,11 @@ class SliceService:
                 connection, self._repository, context, deployment_id, desired,
                 self._settings.capabilities_dir,
             )
+            validate_update_headroom(
+                inputs,
+                vcpu_max=self._settings.headroom_vcpu_max,
+                memory_max_mb=self._settings.headroom_memory_max_mb,
+            )
             return build_update_plan(inputs)
 
         return plan_factory
@@ -338,6 +346,8 @@ class SliceService:
                         "the user's service level is not allowed in this availability zone"
                     )
 
+                if await self._repository.has_stopped_nodes(connection, slice_id):
+                    raise ConflictError("Update is blocked while the slice has STOPPED VMs")
                 validate_definition(desired)
                 if not await SliceRepository().update_version_spec(
                     connection,

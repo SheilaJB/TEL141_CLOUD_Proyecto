@@ -420,6 +420,7 @@ def build_update_plan(inputs: UpdateInputs) -> DeploymentPlan:
                         inputs.flavors, existing.flavor, f"vms[{vm.name}].flavor"
                     ),
                     flavor=flavor,
+                    hot_resize=capabilities.hot_resize,
                 )
             )
 
@@ -569,6 +570,29 @@ def build_update_plan(inputs: UpdateInputs) -> DeploymentPlan:
     for action in builder.actions:
         if action.op == ActionOp.DELETE_LINK:
             builder.depend(action.id, *network_additions)
+
+    actions_by_id = {action.id: action for action in builder.actions}
+    for index, action in enumerate(builder.actions):
+        if action.op == ActionOp.ATTACH_PORT:
+            prepare = any(
+                action.id in builder.dependencies[create_id]
+                for create_id in create_vm_ids.values()
+            )
+            guest_mode = "prepare" if prepare else "live"
+        elif action.op == ActionOp.DETACH_PORT:
+            cleanup = any(
+                actions_by_id[dependency].op == ActionOp.DELETE_VM
+                for dependency in builder.dependencies[action.id]
+            )
+            guest_mode = "cleanup" if cleanup else "live"
+        else:
+            continue
+        builder.actions[index] = Action.model_validate(
+            {
+                **action.model_dump(mode="python"),
+                "params": {"guest": guest_mode},
+            }
+        )
 
     intents = builder.build_intents()
     ordered_rounds, point_of_no_return = order_rounds(builder.actions, builder.dependencies)

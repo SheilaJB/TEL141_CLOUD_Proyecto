@@ -292,7 +292,7 @@ def create_link(request: AdapterActionInput) -> dict:
         # C-tag). No hay br-sl ni veth; solo se asegura br-provider + uplink.
         for target in request.hosts:
             _validate_host(target)
-            _ensure_provider(target.management_ip)
+            _ensure_provider(host.endpoint(target))
         return {"tap_names": []}
     if remote:
         if vlan_stag is None:
@@ -302,7 +302,7 @@ def create_link(request: AdapterActionInput) -> dict:
             raise NonRetryableError("VLAN_STAG_INVALID")
     for target in request.hosts:
         _validate_host(target)
-        ip = target.management_ip
+        ip = host.endpoint(target)
         bridge = _ensure_slice_bridge(ip, slice_id)
         if remote:
             _ensure_provider(ip)
@@ -312,7 +312,7 @@ def create_link(request: AdapterActionInput) -> dict:
 
 def attach_port(request: AdapterActionInput) -> dict:
     target = _require_host(request.host)
-    ip = target.management_ip
+    ip = host.endpoint(target)
     port_id = _param(request, "port_id") or str(request.action.target.id)
     tap = _tap_name(str(port_id))
     vm_name = _domain_for_port(request)
@@ -405,7 +405,7 @@ def attach_port(request: AdapterActionInput) -> dict:
 def detach_port(request: AdapterActionInput) -> dict:
     publico = _publico(request)
     target = _require_host(request.host)
-    ip = target.management_ip
+    ip = host.endpoint(target)
     port_id = _param(request, "port_id") or str(request.action.target.id)
     tap = _tap_name(str(port_id))
     bridge = PROVIDER_BRIDGE if publico else f"br-sl-{request.slice_id}"
@@ -456,7 +456,7 @@ def delete_link(request: AdapterActionInput) -> dict:
 
     for target in targets:
         _validate_host(target)
-        ip = target.management_ip
+        ip = host.endpoint(target)
         with _trunk_lock(ip, slice_id):
             bridges = host.run(ip, ["ovs-vsctl", "list-br"]).splitlines()
             if bridge not in bridges:
@@ -490,7 +490,7 @@ def delete_slice_network(request: AdapterActionInput) -> dict:
     port_ids = request.action.params.get("port_ids") or []
     for target in request.hosts:
         _validate_host(target)
-        ip = target.management_ip
+        ip = host.endpoint(target)
         host.run(ip, ["ovs-vsctl", "--if-exists", "del-port", PROVIDER_BRIDGE, vw])
         host.run(ip, ["ovs-vsctl", "--if-exists", "del-br", bridge])
         if _link_exists(ip, vx):

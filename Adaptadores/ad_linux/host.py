@@ -8,20 +8,45 @@ from . import config
 from .errors import RetryableError
 
 
-def run(host: str, command: Sequence[str], *, timeout: int | None = None) -> str:
-    """Run a sudo command through SSH without shell=True or shell snippets."""
-    args = [
-        "ssh",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        f"ConnectTimeout={config.SSH_TIMEOUT}",
+class Endpoint(str):
+    """`address` threaded through the adapter; carries the gateway SSH port."""
+
+    port: int
+
+    def __new__(cls, address: str, port: int) -> "Endpoint":
+        obj = super().__new__(cls, f"{address}:{port}")
+        obj.port = port
+        return obj
+
+
+def endpoint(target) -> Endpoint:
+    return Endpoint(target.management_ip, target.ssh_port)
+
+
+def _port_of(host: str) -> int:
+    port = getattr(host, "port", None)
+    if port is None:
+        raise RuntimeError("host address has no SSH port; build it with host.endpoint()")
+    return port
+
+
+def _ssh_options(host: str) -> list[str]:
+    options = [
+        "-o", "BatchMode=yes",
+        "-o", f"ConnectTimeout={config.SSH_TIMEOUT}",
     ]
     if config.SSH_KEY:
-        args.extend(["-i", config.SSH_KEY])
+        options.extend(["-i", config.SSH_KEY])
     if config.KNOWN_HOSTS:
-        args.extend(["-o", f"UserKnownHostsFile={config.KNOWN_HOSTS}"])
-    args.append(f"{config.SSH_USER}@{host}")
+        options.extend(["-o", f"UserKnownHostsFile={config.KNOWN_HOSTS}"])
+    return options
+
+
+def run(host: str, command: Sequence[str], *, timeout: int | None = None) -> str:
+    """Run a sudo command through SSH without shell=True or shell snippets."""
+    # `host` se ignora: siempre se conecta al gw (config.GATEWAY_IP) por el puerto del servidor
+    args = ["ssh", "-p", str(_port_of(host)), *_ssh_options(host)]
+    args.append(f"{config.SSH_USER}@{config.GATEWAY_IP}")
     args.extend(["sudo", *command])
     try:
         result = subprocess.run(
@@ -43,18 +68,9 @@ def run(host: str, command: Sequence[str], *, timeout: int | None = None) -> str
 
 
 def upload(host: str, local_path: Path, remote_path: str) -> None:
-    args = [
-        "scp",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        f"ConnectTimeout={config.SSH_TIMEOUT}",
-    ]
-    if config.SSH_KEY:
-        args.extend(["-i", config.SSH_KEY])
-    if config.KNOWN_HOSTS:
-        args.extend(["-o", f"UserKnownHostsFile={config.KNOWN_HOSTS}"])
-    args.extend([str(local_path), f"{config.SSH_USER}@{host}:{remote_path}"])
+    # `host` se ignora: siempre se conecta al gw (config.GATEWAY_IP) por el puerto del servidor
+    args = ["scp", "-P", str(_port_of(host)), *_ssh_options(host)]
+    args.extend([str(local_path), f"{config.SSH_USER}@{config.GATEWAY_IP}:{remote_path}"])
     try:
         result = subprocess.run(
             args,

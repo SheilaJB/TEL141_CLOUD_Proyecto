@@ -96,7 +96,7 @@ def _stop_vm(address: str, vm_name: str) -> None:
 def destroy_slice_host(request: AdapterActionInput) -> dict:
     if request.host is None:
         raise NonRetryableError("HOST_MISSING")
-    address = request.host.management_ip
+    address = host.endpoint(request.host)
     params = request.action.params
     destroyed_vms = []
     for vm in params.get("vms", []):

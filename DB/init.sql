@@ -147,6 +147,7 @@ CREATE TABLE slices.servidor (
     id                  SERIAL PRIMARY KEY,
     ip_serv             INET NOT NULL UNIQUE,
     mac_serv            MACADDR NOT NULL UNIQUE,
+    ssh_port            INTEGER NOT NULL UNIQUE CHECK (ssh_port BETWEEN 1024 AND 65535),
     total_cpu_cores     INTEGER NOT NULL,
     total_ram_mb        INTEGER NOT NULL,
     total_disk_mb       INTEGER NOT NULL,
@@ -154,17 +155,18 @@ CREATE TABLE slices.servidor (
     vram_mb_reserved   INTEGER NOT NULL DEFAULT 0 CHECK (vram_mb_reserved >= 0),
     vdisk_mb_reserved  INTEGER NOT NULL DEFAULT 0 CHECK (vdisk_mb_reserved >= 0),
     zona_id             INTEGER REFERENCES slices.zona_disponibilidad(id),
+    -- Una fila nueva por descubrir (recursos en 0) debe insertarse como 'DOWN'; el descubrimiento (exitoso) la activa
     estado              TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (estado IN ('ACTIVE', 'MAINTENANCE', 'DOWN'))
 );
 
-INSERT INTO slices.servidor (ip_serv, mac_serv, total_cpu_cores, total_ram_mb, total_disk_mb, zona_id) VALUES
-    ('192.168.201.1', 'fa:16:3e:6d:2a:ec', 4, 3490, 7000, 1),       -- server 1
-    ('192.168.201.2', 'fa:16:3e:0c:21:0d', 4, 3490, 7300, 2),       -- server 2
-    ('192.168.201.3', 'fa:16:3e:05:b2:5d', 4, 3490, 7100, 2),       -- server 3
-    ('192.168.201.4', 'fa:16:3e:71:e4:8e', 4, 3490, 7100, 2);       -- server 4
-    -- ('192.168.202.2', 'fa:16:3e:ee:0c:46', 4, 3100X, 6400X, 3),    -- worker 1
-    -- ('192.168.202.3', 'fa:16:3e:24:7d:00', 4, 3100X, 6400X, 3),     -- worker 2
-    -- ('192.168.202.4', 'fa:16:3e:d3:f3:4d', 4, 3100X, 6400X, 3);     -- worker 3
+INSERT INTO slices.servidor (ip_serv, mac_serv, ssh_port, total_cpu_cores, total_ram_mb, total_disk_mb, zona_id) VALUES
+    ('192.168.201.1', 'fa:16:3e:6d:2a:ec', 5811, 4, 3490, 7000, 1),       -- server 1
+    ('192.168.201.2', 'fa:16:3e:0c:21:0d', 5812, 4, 3490, 7300, 2),       -- server 2
+    ('192.168.201.3', 'fa:16:3e:05:b2:5d', 5813, 4, 3490, 7100, 2),       -- server 3
+    ('192.168.201.4', 'fa:16:3e:71:e4:8e', 5814, 4, 3490, 7100, 2);       -- server 4
+    -- ('192.168.202.2', 'fa:16:3e:ee:0c:46', 5822, 4, 3100X, 6400X, 3),    -- worker 1
+    -- ('192.168.202.3', 'fa:16:3e:24:7d:00', 5823, 4, 3100X, 6400X, 3),     -- worker 2
+    -- ('192.168.202.4', 'fa:16:3e:d3:f3:4d', 5824, 4, 3100X, 6400X, 3);     -- worker 3
 
 CREATE TABLE slices.image (
     id                      SERIAL PRIMARY KEY,
@@ -178,8 +180,9 @@ CREATE TABLE slices.image (
 
 INSERT INTO slices.image (nombre, cluster_compatible, ruta_referencia, diskmb_size) VALUES
     ('Cirros', 1, 'cirros-0.6.2-x86_64-disk.img', 150),
-    -- ('Linux Alpine', 1, '/images/alpine.qcow2'),
-    ('Ubuntu', 1, 'focal-server-cloudimg-amd64.img', 2350);
+    ('Ubuntu', 1, 'focal-server-cloudimg-amd64.img', 2350),
+    ('Ubuntu 24.04', 1, 'ubuntu-24.04-minimal-cloudimg-amd64.img', 2450),
+    ('Ubuntu 20.04', 1, 'focal-server-cloudimg-amd64.img', 2450);
 
 CREATE TABLE slices.flavor (
     id                  SERIAL PRIMARY KEY,

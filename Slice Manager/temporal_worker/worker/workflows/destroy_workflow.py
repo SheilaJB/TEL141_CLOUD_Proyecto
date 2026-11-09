@@ -143,6 +143,7 @@ class DestroyWorkflow(WorkflowHelpers):
                     host=AdapterHost(
                         server_id=server.server_id,
                         management_ip=server.management_ip,
+                        ssh_port=server.ssh_port,
                     ),
                 )
             )

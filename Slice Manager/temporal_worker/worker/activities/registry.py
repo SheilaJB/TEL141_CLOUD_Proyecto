@@ -116,6 +116,7 @@ class DeploymentActivities:
             return AdapterHost(
                 server_id=server.server_id,
                 management_ip=server.management_ip,
+                ssh_port=server.ssh_port,
             )
 
         def display_for(node_id: UUID) -> int:

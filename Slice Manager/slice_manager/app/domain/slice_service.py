@@ -658,6 +658,7 @@ class SliceService:
             ServerHost(
                 server_id=int(row["server_id"]),
                 management_ip=str(row["management_ip"]),
+                ssh_port=int(row["ssh_port"]),
             )
             for row in rows
         ]

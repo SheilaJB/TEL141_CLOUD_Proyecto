@@ -48,7 +48,7 @@ def _run_path(name: str) -> str:
 
 def create_vm(request: AdapterActionInput) -> dict:
     target = _require_host(request)
-    address = target.management_ip
+    address = host.endpoint(target)
     params = request.action.params
     vm_id = str(request.action.target.id)
     vm_name = "vm-" + vm_id[:8]
@@ -127,7 +127,7 @@ def create_vm(request: AdapterActionInput) -> dict:
 
 def delete_vm(request: AdapterActionInput) -> dict:
     target = _require_host(request)
-    address = target.management_ip
+    address = host.endpoint(target)
     vm_id = str(_param(request, "vm_id") or request.action.target.id)
     vm_name = "vm-" + vm_id[:8]
 
@@ -217,7 +217,7 @@ def _define_existing_xml(address: str, vm_name: str, xml: str) -> None:
 def resize_vm(request: AdapterActionInput) -> dict:
     if config.VM_BACKEND != "libvirt":
         raise NonRetryableError("LIBVIRT_REQUIRED")
-    address = _require_host(request).management_ip
+    address = host.endpoint(_require_host(request))
     params = request.action.params
     before = _resize_flavor(params, "before_flavor")
     after = _resize_flavor(params, "flavor")

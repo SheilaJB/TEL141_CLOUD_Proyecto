@@ -10,6 +10,7 @@ from contracts.plan import Action, ActionOp
 class AdapterHost(ContractModel):
     server_id: int
     management_ip: str
+    ssh_port: int = Field(ge=5000, le=6000)
 
     @field_validator("management_ip")
     @classmethod

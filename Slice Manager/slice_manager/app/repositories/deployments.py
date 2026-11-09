@@ -737,13 +737,14 @@ class DeploymentRepository:
     ) -> list[asyncpg.Record]:
         return await connection.fetch(
             """
-            SELECT srv.id AS server_id, host(srv.ip_serv) AS management_ip
-                FROM slices.slice AS s
-              JOIN slices.servidor AS srv
-                ON srv.zona_id = s.zona_id
-               AND srv.estado = 'ACTIVE'
-             WHERE s.id = $1
-             ORDER BY srv.id
+            SELECT srv.id AS server_id, host(srv.ip_serv) AS management_ip,
+                   srv.ssh_port
+            FROM slices.slice AS s
+            JOIN slices.servidor AS srv
+            ON srv.zona_id = s.zona_id
+            AND srv.estado = 'ACTIVE'
+            WHERE s.id = $1
+            ORDER BY srv.id
             """,
             slice_id,
         )

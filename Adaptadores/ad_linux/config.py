@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 SSH_USER = os.getenv("ADAPTER_SSH_USER", "ubuntu")
+GATEWAY_IP = os.getenv("ADAPTER_GATEWAY_IP", "10.20.11.250")
 SSH_KEY = os.getenv("ADAPTER_SSH_KEY")
 KNOWN_HOSTS = os.getenv("ADAPTER_KNOWN_HOSTS")
 SSH_TIMEOUT = int(os.getenv("ADAPTER_SSH_TIMEOUT", "30"))

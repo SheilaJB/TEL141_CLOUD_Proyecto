@@ -32,24 +32,13 @@ def validate_update_headroom(
         if target is None:
             raise ConflictError(f"flavor {desired.flavor!r} is missing from Update catalog")
         current = current_by_name.get(desired.name)
-        if current is None:
-            if target.vcpu > vcpu_max or target.ram_mb > memory_max_mb:
-                raise ConflictError(
-                    f"new VM {desired.name!r} exceeds the hot-resize headroom ceiling"
-                )
-            continue
-        before = inputs.flavors.get(current.flavor)
-        if before is None:
+        if current is not None and current.flavor not in inputs.flavors:
             raise ConflictError(
                 f"current flavor {current.flavor!r} is missing from Update catalog"
             )
-        if (
-            target.vcpu > vcpu_max and target.vcpu > before.vcpu
-        ) or (
-            target.ram_mb > memory_max_mb and target.ram_mb > before.ram_mb
-        ):
+        if target.vcpu > vcpu_max or target.ram_mb > memory_max_mb:
             raise ConflictError(
-                f"VM {desired.name!r} grows beyond the hot-resize headroom ceiling"
+                f"VM {desired.name!r} exceeds the hot-resize headroom ceiling"
             )
 
 

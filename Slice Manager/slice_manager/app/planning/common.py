@@ -43,6 +43,7 @@ class CatalogImage:
     disk_size: int
     catalog_id: int
     cluster_compatible: str | None
+    cloud_init: bool
     active: bool = True
 
 
@@ -170,7 +171,7 @@ def create_vm_action(
         params={
             "name": vm.name,
             "hostname": vm.name,
-            "image": {"reference": image.reference},
+            "image": {"reference": image.reference, "cloud_init": image.cloud_init},
             "flavor": {
                 "name": flavor.name,
                 "vcpu": flavor.vcpu,

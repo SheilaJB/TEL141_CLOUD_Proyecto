@@ -37,7 +37,7 @@ class QueryRepository:
 
     async def list_images(self, active_only: bool = True) -> List[ImageResponse]:
         query = """
-            SELECT id, nombre, cluster_compatible, ruta_referencia, contador_refs, estado
+            SELECT id, nombre, cluster_compatible, ruta_referencia, cloud_init, contador_refs, estado
             FROM slices.image
         """
         if active_only:

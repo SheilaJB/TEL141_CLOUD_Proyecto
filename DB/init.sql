@@ -174,15 +174,16 @@ CREATE TABLE slices.image (
     cluster_compatible      INTEGER REFERENCES slices.cluster(id),  -- puede ser NULL, cluster donde se puede desplegar la imagen
     ruta_referencia         TEXT NOT NULL,   -- ubicación/id real de la imagen
     diskmb_size             INTEGER NOT NULL,  -- verificar con flavor
+    cloud_init              BOOLEAN NOT NULL DEFAULT TRUE,
     contador_refs           INTEGER NOT NULL DEFAULT 0,
     estado                  TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (estado IN ('ACTIVE', 'DEPRECATED', 'DELETED'))
 );
 
-INSERT INTO slices.image (nombre, cluster_compatible, ruta_referencia, diskmb_size) VALUES
-    ('Cirros', 1, 'cirros-0.6.2-x86_64-disk.img', 150),
-    ('Ubuntu', 1, 'focal-server-cloudimg-amd64.img', 2350),
-    ('Ubuntu 24.04', 1, 'ubuntu-24.04-minimal-cloudimg-amd64.img', 2450),
-    ('Ubuntu 20.04', 1, 'focal-server-cloudimg-amd64.img', 2450);
+INSERT INTO slices.image (nombre, cluster_compatible, ruta_referencia, diskmb_size, cloud_init) VALUES
+    ('Cirros', 1, 'cirros-0.6.2-x86_64-disk.img', 150, FALSE),
+    ('Ubuntu', 1, 'focal-server-cloudimg-amd64.img', 2350, TRUE),
+    ('Ubuntu 24.04', 1, 'ubuntu-24.04-minimal-cloudimg-amd64.img', 2450, TRUE),
+    ('Ubuntu 20.04', 1, 'focal-server-cloudimg-amd64.img', 2450, TRUE);
 
 CREATE TABLE slices.flavor (
     id                  SERIAL PRIMARY KEY,

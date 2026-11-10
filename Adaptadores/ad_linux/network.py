@@ -14,6 +14,7 @@ import hashlib
 import ipaddress
 import base64
 import json
+import logging
 import re
 import threading
 import time
@@ -28,6 +29,7 @@ PROVIDER_BRIDGE = "br-provider"
 STAG_MIN = 100
 STAG_MAX = 3999  # 4000 reservado para trafico publico
 GUEST_COMMAND_TIMEOUT_S = 30
+logger = logging.getLogger(__name__)
 
 
 _trunk_locks: dict[tuple[str, str], threading.Lock] = {}
@@ -90,6 +92,13 @@ def _guest_mode(request: AdapterActionInput, *, attach: bool) -> str:
     return mode
 
 
+def _cloud_init_enabled(request: AdapterActionInput) -> bool:
+    value = _param(request, "cloud_init")
+    if not isinstance(value, bool):
+        raise NonRetryableError("IMAGE_CLOUD_INIT_INVALID")
+    return value
+
+
 def _domain_for_port(request: AdapterActionInput) -> str:
     node_id = request.action.target.node_id
     if node_id is None:
@@ -123,8 +132,10 @@ def _guest_agent_command(
         result = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise NonRetryableError("GUEST_AGENT_RESPONSE_INVALID") from exc
-    if not isinstance(result, dict) or "error" in result:
-        raise NonRetryableError("GUEST_AGENT_COMMAND_FAILED")
+    if not isinstance(result, dict):
+        raise NonRetryableError("GUEST_AGENT_RESPONSE_INVALID")
+    if "error" in result:
+        raise NonRetryableError("GUEST_AGENT_COMMAND_FAILED", str(result["error"])[:500])
     value = result.get("return")
     if not isinstance(value, dict):
         return {}
@@ -180,6 +191,14 @@ def _guest_exec(
 
 def _guest_ping(address: str, vm_name: str) -> None:
     _guest_agent_command(address, vm_name, "guest-ping")
+
+
+def _log_guest_error(operation: str, vm_name: str, mac: str, exc: Exception) -> None:
+    if isinstance(exc, RetryableError) and exc.code != "GUEST_COMMAND_TIMEOUT":
+        raise exc
+    if isinstance(exc, NonRetryableError) and exc.code == "LIBVIRT_UNAVAILABLE":
+        raise exc
+    logger.warning("Guest network %s failed for %s (%s): %s", operation, vm_name, mac, exc)
 
 
 def _hot_netplan_path(mac: str) -> str:
@@ -323,25 +342,24 @@ def attach_port(request: AdapterActionInput) -> dict:
     netplan_path = ""
     netplan_contents = ""
     interfaces: dict[str, str] = {}
-    existing_contents: str | None = None
+    cloud_init = False
     if is_live:
+        cloud_init = _cloud_init_enabled(request)
+        logger.info("VM %s: cloud_init=%s", vm_name, cloud_init)
         network = _param(request, "network")
         if not isinstance(network, dict):
             raise NonRetryableError("PORT_PARAMS_MISSING")
         nic = dict(network)
         nic["publico"] = bool(_param(request, "publico"))
         mac = str(nic.get("mac") or "")
-        netplan_path = _hot_netplan_path(mac)
-        netplan_contents = render_network_config([nic])
+        if cloud_init:
+            netplan_path = _hot_netplan_path(mac)
+            netplan_contents = render_network_config([nic])
         interfaces = libvirt_vm.domain_interfaces(
             libvirt_vm._virsh(ip, "dumpxml", vm_name)
         )
         if tap in interfaces and interfaces[tap].lower() != mac.lower():
             raise NonRetryableError("TAP_DOMAIN_CONFLICT")
-        _guest_ping(ip, vm_name)
-        existing_contents = _guest_read_file(ip, vm_name, netplan_path)
-        if existing_contents is not None and existing_contents != netplan_contents:
-            raise NonRetryableError("NETPLAN_FILE_CONFLICT")
     if _param(request, "publico"):
         _ensure_provider(ip)
         bridge = PROVIDER_BRIDGE
@@ -361,45 +379,25 @@ def attach_port(request: AdapterActionInput) -> dict:
 
     if mode == "prepare":
         return {"tap_names": [tap], "_already_existed": already_existed}
-    if interfaces.get(tap, "").lower() == mac.lower() and existing_contents == netplan_contents:
-        return {"tap_names": [tap], "_already_existed": True}
-
-    write_attempted = existing_contents is None
-    try:
-        if tap not in interfaces:
-            libvirt_vm.change_device(
-                ip,
-                vm_name,
-                libvirt_vm.interface_xml(port_id=str(port_id), mac=mac),
-                attach=True,
-            )
-        if write_attempted:
-            _guest_write_file(ip, vm_name, netplan_path, netplan_contents)
-        _run_netplan(ip, vm_name, "generate")
-        _run_netplan(ip, vm_name, "apply")
-    except Exception as exc:
+    if tap not in interfaces:
+        libvirt_vm.change_device(
+            ip,
+            vm_name,
+            libvirt_vm.interface_xml(port_id=str(port_id), mac=mac),
+            attach=True,
+        )
+    if cloud_init:
         try:
-            current = libvirt_vm.domain_interfaces(
-                libvirt_vm._virsh(ip, "dumpxml", vm_name)
-            )
-            if tap in current:
-                libvirt_vm.change_device(
-                    ip,
-                    vm_name,
-                    libvirt_vm.interface_xml(
-                        port_id=str(port_id), mac=current[tap]
-                    ),
-                    attach=False,
-                )
-            if write_attempted:
-                _guest_remove_file(ip, vm_name, netplan_path)
-                _run_netplan(ip, vm_name, "generate")
-                _run_netplan(ip, vm_name, "apply")
-        except Exception as rollback_error:
-            raise RetryableError(
-                "HOT_ATTACH_ROLLBACK_FAILED", str(rollback_error)[:500]
-            ) from rollback_error
-        raise
+            _guest_ping(ip, vm_name)
+            existing_contents = _guest_read_file(ip, vm_name, netplan_path)
+            if existing_contents is not None and existing_contents != netplan_contents:
+                raise NonRetryableError("NETPLAN_FILE_CONFLICT")
+            if existing_contents is None:
+                _guest_write_file(ip, vm_name, netplan_path, netplan_contents)
+            _run_netplan(ip, vm_name, "generate")
+            _run_netplan(ip, vm_name, "apply")
+        except (NonRetryableError, RetryableError, RuntimeError) as exc:
+            _log_guest_error("configuration", vm_name, mac, exc)
     return {"tap_names": [tap], "_already_existed": already_existed}
 
 def detach_port(request: AdapterActionInput) -> dict:
@@ -426,10 +424,16 @@ def detach_port(request: AdapterActionInput) -> dict:
         _remove_tap(ip, bridge, tap)
         return {"tap_names": [], "_already_absent": not tap_existed}
 
-    _guest_ping(ip, vm_name)
-    netplan_path = _hot_netplan_path(mac)
-    _guest_remove_file(ip, vm_name, netplan_path)
-    _run_netplan(ip, vm_name, "apply")
+    cloud_init = _cloud_init_enabled(request)
+    logger.info("VM %s: cloud_init=%s", vm_name, cloud_init)
+    if cloud_init:
+        try:
+            _guest_ping(ip, vm_name)
+            netplan_path = _hot_netplan_path(mac)
+            _guest_remove_file(ip, vm_name, netplan_path)
+            _run_netplan(ip, vm_name, "apply")
+        except (NonRetryableError, RetryableError, RuntimeError) as exc:
+            _log_guest_error("cleanup", vm_name, mac, exc)
     libvirt_vm.change_device(
         ip,
         vm_name,

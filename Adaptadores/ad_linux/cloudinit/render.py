@@ -32,22 +32,18 @@ def _yaml_scalar(value: object) -> str:
 
 def render_network_config(
     nics: Sequence[Mapping[str, Any]],
-    *,
-    cloud_init_net: bool = True,
 ) -> str:
     """Render netplan v2 config with one static interface per resolved NIC."""
-    if nics and not cloud_init_net:
-        raise NonRetryableError("NET_CONFIG_UNSUPPORTED")
-
+    if not nics:
+        return "version: 2\nethernets: {}\n"
+    resolved = [(nic, _required_nic_fields(nic)) for nic in nics]
     lines = ["version: 2", "ethernets:"]
-    for nic in nics:
-        mac, ip, nic_index = _required_nic_fields(nic)
+    for nic, (mac, ip, nic_index) in sorted(resolved, key=lambda item: item[1][2]):
         lines.extend(
             [
-                f"  ens{nic_index+3}:",
+                f"  nic{nic_index}:",
                 "    match:",
                 f"      macaddress: {_yaml_scalar(mac)}",
-                f"    set-name: ens{nic_index+3}",
                 "    dhcp4: false",
                 "    addresses:",
                 f"      - {_yaml_scalar(ip)}",
@@ -83,6 +79,25 @@ def render_user_data(
             ]
         )
     return "\n".join(lines) + "\n"
+
+
+def render_seed_user_data(hostname: str) -> str:
+    return "\n".join(
+        [
+            "#cloud-config",
+            "packages:",
+            "  - qemu-guest-agent",
+            f"hostname: {_yaml_scalar(hostname)}",
+            "users:",
+            "  - default",
+            "ssh_pwauth: true",
+            "chpasswd:",
+            "  expire: false",
+            "  list: |",
+            "    ubuntu:ubuntu",
+            "",
+        ]
+    )
 
 
 def render_meta_data(vm_id: str, hostname: str) -> str:

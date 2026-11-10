@@ -1,8 +1,4 @@
-"""Action handlers for the Linux adapter.
-
-The handlers are intentionally unimplemented in this phase. They are the only
-boundary where host execution will be added later.
-"""
+"""Action handlers for the Linux adapter."""
 
 from contracts.adapter import AdapterActionInput
 

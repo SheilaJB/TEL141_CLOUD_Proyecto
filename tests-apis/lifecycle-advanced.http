@@ -1,0 +1,162 @@
+# Ciclo completo: Deploy -> Update -> Destroy (usuario avanzado 20260002)
+# Ejecutar en orden, de arriba hacia abajo. Cada paso usa variables del anterior.
+# Deploy/Update/Destroy son asíncronos (202): consulta "Estado" entre pasos.
+# Si el deployment queda en espera de aprobación, usa la sección del operador.
+
+@baseUrl = https://localhost:3000
+
+@token = {{login.response.body.$.access_token}}
+@opToken = {{opLogin.response.body.$.access_token}}
+
+@sliceId = {{createSlice.response.body.$.slice_id}}
+@v1 = {{createSlice.response.body.$.numero_version}}
+@v2 = {{createV2.response.body.$.numero_version}}
+
+@deployId = {{deploy.response.body.$.deployment_id}}
+@updateId = {{update.response.body.$.deployment_id}}
+@destroyId = {{destroy.response.body.$.deployment_id}}
+
+### Health check
+GET {{baseUrl}}/healthz
+
+### ---------- 0. Login ----------
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "codigo": "20260002", "password": "consumidor", "client": "cli" }
+
+### ---------- 1. DEPLOY ----------
+# Crea slice + versión 1 (DRAFT) con 3 VMs
+# @name createSlice
+POST {{baseUrl}}/slices
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "lifecycle-test",
+  "zona_id": 2,
+  "spec": {
+    "schema_version": 1,
+    "vms": [
+      { "name": "vm1", "flavor": "verde-ex2", "image": "Ubuntu", "public": true },
+      { "name": "vm2", "flavor": "verde-ex2", "image": "Ubuntu", "public": true },
+      { "name": "vm3", "flavor": "rojo-ex2",  "image": "Cirros", "public": false }
+    ],
+    "links": [
+      { "name": "l-vm1-vm2", "endpoints": ["vm1", "vm2"] },
+      { "name": "l-vm2-vm3", "endpoints": ["vm2", "vm3"] }
+    ]
+  }
+}
+
+### 1a. (opcional) Validar spec y ver plan sin ejecutar nada
+POST {{baseUrl}}/slices/{{sliceId}}/versions/{{v1}}/validate
+Authorization: Bearer {{token}}
+
+###
+POST {{baseUrl}}/slices/{{sliceId}}/versions/{{v1}}/plan
+Authorization: Bearer {{token}}
+
+### 1b. Deploy real (202; state REJECTED => 409)
+# @name deploy
+POST {{baseUrl}}/slices/{{sliceId}}/versions/{{v1}}/deploy
+Authorization: Bearer {{token}}
+
+### 1c. Estado del slice (esperar ACTIVE antes del Update)
+GET {{baseUrl}}/cruds/slices/{{sliceId}}
+Authorization: Bearer {{token}}
+
+### 1d. Topología
+GET {{baseUrl}}/cruds/slices/{{sliceId}}/topology
+Authorization: Bearer {{token}}
+
+### ---------- 2. UPDATE ----------
+# Requisitos: versión origen ACTIVE, sin otro deployment activo, sin VMs STOPPED.
+# 2a. Crear versión 2 como borrador copiando la v1 (alternativas: "empty": true)
+# @name createV2
+POST {{baseUrl}}/slices/{{sliceId}}/versions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "from_version": {{v1}} }
+
+### 2b. (opcional) Editar el borrador y ver el plan antes de aplicar
+PUT {{baseUrl}}/slices/{{sliceId}}/versions/{{v2}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "schema_version": 1,
+  "vms": [
+    { "name": "vm1", "flavor": "verde-ex2", "image": "Ubuntu", "public": true },
+    { "name": "vm2", "flavor": "verde-ex2", "image": "Ubuntu", "public": true },
+    { "name": "vm4", "flavor": "verde-ex2", "image": "Ubuntu", "public": false }
+  ],
+  "links": [
+    { "name": "l-vm1-vm2", "endpoints": ["vm1", "vm2"] },
+    { "name": "l-vm2-vm4", "endpoints": ["vm2", "vm4"] }
+  ]
+}
+
+### 2c. Aplicar Update: el body es el estado deseado (reemplaza el spec de v2)
+# Aquí: vm1 cambia de flavor (resize), vm3 se elimina, vm4 se agrega.
+# @name update
+POST {{baseUrl}}/slices/{{sliceId}}/versions/{{v2}}/update
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "schema_version": 1,
+  "vms": [
+    { "name": "vm1", "flavor": "large-v1", "image": "Ubuntu", "public": true },
+    { "name": "vm2", "flavor": "verde-ex2", "image": "Ubuntu", "public": true },
+    { "name": "vm4", "flavor": "verde-ex2", "image": "Ubuntu", "public": false }
+  ],
+  "links": [
+    { "name": "l-vm1-vm2", "endpoints": ["vm1", "vm2"] },
+    { "name": "l-vm2-vm4", "endpoints": ["vm2", "vm4"] }
+  ]
+}
+
+### 2d. Estado y topología tras el Update
+GET {{baseUrl}}/cruds/slices/{{sliceId}}
+Authorization: Bearer {{token}}
+
+###
+GET {{baseUrl}}/cruds/slices/{{sliceId}}/topology
+Authorization: Bearer {{token}}
+
+### ---------- 3. DESTROY ----------
+# @name destroy
+POST {{baseUrl}}/slices/{{sliceId}}/destroy
+Authorization: Bearer {{token}}
+
+### 3a. Verificar que quedó destruido
+GET {{baseUrl}}/cruds/slices/{{sliceId}}
+Authorization: Bearer {{token}}
+
+### ---------- OPERADOR: aprobar / rechazar deployments ----------
+# Solo si un deploy/update/destroy queda pendiente de aprobación.
+# Cambia {{deployId}} por {{updateId}} o {{destroyId}} según el caso.
+# @name opLogin
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "codigo": "operador", "password": "operador", "client": "cli" }
+
+### Aprobar
+POST {{baseUrl}}/slices/deployments/{{deployId}}/approve
+Authorization: Bearer {{opToken}}
+Content-Type: application/json
+
+{ "approved": true }
+
+### Rechazar
+POST {{baseUrl}}/slices/deployments/{{deployId}}/approve
+Authorization: Bearer {{opToken}}
+Content-Type: application/json
+
+{ "approved": false, "reason": "motivo del rechazo" }
+
+###

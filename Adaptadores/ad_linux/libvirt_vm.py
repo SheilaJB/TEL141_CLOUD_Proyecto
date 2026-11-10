@@ -112,7 +112,7 @@ def domain_xml(
             "    </disk>"
         )
     interfaces = []
-    for nic in nics:
+    for nic in sorted(nics, key=lambda item: int(item["nic_index"])):
         port_id = str(nic.get("port_id") or nic.get("id"))
         # type=ethernet + managed=no: usa el TAP que ya creo attach_port
         interface = interface_xml(port_id=port_id, mac=str(nic["mac"]))
@@ -154,10 +154,7 @@ def domain_xml(
 
 
 def running(address: str, vm_name: str) -> bool:
-    try:
-        return _virsh(address, "domstate", vm_name).strip() == "running"
-    except RuntimeError:
-        return False  # el dominio no existe
+    return domain_exists(address, vm_name) and _virsh(address, "domstate", vm_name).strip() == "running"
 
 
 def pid(address: str, vm_name: str) -> int:
@@ -230,15 +227,12 @@ def _raise_start_error(stderr: str) -> None:
 
 
 def destroy(address: str, vm_name: str) -> None:
-    """Apaga a la fuerza; sirve aunque el dominio no exista o libvirt no este."""
-    try:
+    if domain_exists(address, vm_name) and _virsh(address, "domstate", vm_name).strip() != "shut off":
         _virsh(address, "destroy", vm_name)
-    except (RuntimeError, NonRetryableError):
-        pass
+        if _virsh(address, "domstate", vm_name).strip() != "shut off":
+            raise RetryableError("VM_STILL_RUNNING", vm_name)
 
 
 def undefine(address: str, vm_name: str) -> None:
-    try:
+    if domain_exists(address, vm_name):
         _virsh(address, "undefine", vm_name)
-    except (RuntimeError, NonRetryableError):
-        pass

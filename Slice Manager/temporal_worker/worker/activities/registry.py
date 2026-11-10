@@ -78,7 +78,9 @@ class DeploymentActivities:
         runtime_ports_by_node: dict[UUID, list[SliceRuntimePort]] = {}
         runtime_ports_by_id: dict[UUID, SliceRuntimePort] = {}
         runtime_links: dict[UUID, SliceRuntimeLink] = {}
+        runtime_cloud_init: dict[UUID, bool] = {}
         if runtime is not None:
+            runtime_cloud_init = {node.node_id: node.cloud_init for node in runtime.nodes}
             # Solo se usa BD para nodos que no vienen de Placement (Update).
             server_by_node = {
                 **placement.server_by_node,
@@ -257,6 +259,11 @@ class DeploymentActivities:
                     )
                     params["publico"] = allocation.publico
                     params["public_vid"] = network.public_vid
+                    if params.get("guest") == "live":
+                        node_id = action.target.node_id
+                        if node_id not in runtime_cloud_init:
+                            raise ValueError(f"missing image cloud_init for node {node_id}")
+                        params["cloud_init"] = runtime_cloud_init[node_id]
                     # Nodo existente: server_by_node se completa desde slice_nodo.server_id.
                     server_id = server_by_node.get(action.target.node_id)
                     if server_id is None:
@@ -320,6 +327,10 @@ class DeploymentActivities:
                     if port is None or port.node_id != node_id or port.link_id != action.target.link_id:
                         raise ValueError(f"missing runtime port {action.target.id}")
                     params["publico"] = port.public
+                    if params.get("guest") == "live":
+                        if node_id not in runtime_cloud_init:
+                            raise ValueError(f"missing image cloud_init for node {node_id}")
+                        params["cloud_init"] = runtime_cloud_init[node_id]
                 elif action.op == ActionOp.DELETE_LINK:
                     link = runtime_links.get(action.target.id)
                     if link is None:
@@ -412,6 +423,7 @@ class DeploymentActivities:
         missing = self._missing_runtime_nodes(plan, placement, vnc_displays)
         needs_network_runtime = any(
             action.op in {ActionOp.DELETE_LINK, ActionOp.DETACH_PORT}
+            or (action.op == ActionOp.ATTACH_PORT and action.params.get("guest") == "live")
             for round_actions in plan.rounds
             for action in round_actions
         )

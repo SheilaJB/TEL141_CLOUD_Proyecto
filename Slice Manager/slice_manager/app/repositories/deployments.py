@@ -182,7 +182,7 @@ class DeploymentRepository:
         image_rows = await connection.fetch(
             """
             SELECT i.id, i.nombre, i.ruta_referencia, c.nombre AS cluster_name,
-                   i.diskmb_size, i.estado
+                   i.diskmb_size, i.estado, i.cloud_init
             FROM slices.image AS i
             LEFT JOIN slices.cluster AS c ON c.id = i.cluster_compatible
             WHERE (i.estado = 'ACTIVE' OR $2)
@@ -210,6 +210,7 @@ class DeploymentRepository:
                 disk_size=row["diskmb_size"],
                 catalog_id=row["id"],
                 cluster_compatible=row["cluster_name"],
+                cloud_init=row["cloud_init"],
                 active=row["estado"] == "ACTIVE",
             )
             for row in image_rows
@@ -766,8 +767,9 @@ class DeploymentRepository:
         filter_ids = node_ids or None
         node_rows = await connection.fetch(
             """
-            SELECT n.id AS node_id, n.name, n.server_id, n.vnc_display
+            SELECT n.id AS node_id, n.name, n.server_id, n.vnc_display, i.cloud_init
             FROM slices.slice_nodo AS n
+            JOIN slices.image AS i ON i.id = n.imagen_id
             WHERE n.slice_id = $1
               AND n.estado_nodo <> 'DELETED'
               AND ($2::uuid[] IS NULL OR n.id = ANY($2::uuid[]))
@@ -811,6 +813,7 @@ class DeploymentRepository:
                     name=row["name"],
                     server_id=row["server_id"],
                     vnc_display=row["vnc_display"],
+                    cloud_init=row["cloud_init"],
                 )
                 for row in node_rows
             ],

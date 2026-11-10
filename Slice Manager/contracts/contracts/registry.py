@@ -82,6 +82,7 @@ class SliceRuntimeNode(ContractModel):
     name: str
     server_id: int | None = None
     vnc_display: int | None = None
+    cloud_init: bool
 
 
 class SliceRuntimePort(ContractModel):

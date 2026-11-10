@@ -1,4 +1,5 @@
 from typing import Literal
+import re
 
 from pydantic import Field, ValidationError, field_validator
 
@@ -19,6 +20,13 @@ class VMDefinitionShape(ContractModel):
         if not result:
             raise ValueError("must not be blank")
         return result
+
+    @field_validator("name")
+    @classmethod
+    def validate_hostname(cls, value: str) -> str:
+        if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", value):
+            raise ValueError("must be a lowercase hostname of 1-63 letters, digits or hyphens, beginning and ending with a letter or digit")
+        return value
 
 
 class LinkDefinitionShape(ContractModel):

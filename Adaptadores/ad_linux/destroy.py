@@ -1,96 +1,13 @@
-"""Idempotent slice-host destruction.
-
-Usa las MISMAS rutas que vm.py (pidfile sin extension en RUN_ROOT y discos en
-STORAGE_ROOT/overlay). Una VM solo se reporta en destroyed_vms cuando se
-verifico que su proceso QEMU ya no existe; si sobrevive se lanza un error
-reintentable y el Destroy no marca nada como borrado.
-"""
-
-import re
-import shlex
-import time
+"""Idempotent slice-host destruction using libvirt."""
 
 from contracts.adapter import AdapterActionInput
 
 from . import config, host, libvirt_vm
-from .errors import NonRetryableError, RetryableError
-
-
-def _run_path(name: str) -> str:
-    return str(config.RUN_ROOT / name)
-
-TERM_WAIT_SECONDS = 10
-KILL_WAIT_SECONDS = 5
-
-
-def _qemu_pids(address: str, vm_name: str) -> list[str]:
-    """PIDs de QEMU de esta VM, por pidfile y por linea de comando.
-
-    La busqueda por cmdline cubre pidfiles borrados o desactualizados.
-    """
-    pids: set[str] = set()
-    try:
-        pid = host.run(address, ["cat", _run_path(vm_name)]).strip()
-        if pid.isdigit():
-            host.run(address, ["grep", "-qa", vm_name, f"/proc/{pid}/cmdline"])
-            pids.add(pid)
-    except RuntimeError:
-        pass
-    try:
-        found = host.run(address, ["pgrep", "-f", shlex.quote(_cmdline_pattern(vm_name))])
-        pids.update(item for item in found.split() if item.isdigit())
-    except RuntimeError:
-        pass  # pgrep sale con 1 cuando no hay coincidencias
-    return sorted(pids)
-
-
-def _cmdline_pattern(vm_name: str) -> str:
-    # QEMU manual: "-name vm-x " / libvirt: "-name guest=vm-x,"
-    # [q] evita que pgrep encuentre al propio sudo que lo lanza
-    if not re.fullmatch(r"vm-[0-9a-f]{8}", vm_name):
-        raise NonRetryableError("VM_NAME_INVALID", vm_name)
-    return f"[q]emu-system-x86_64 -name (guest=)?{vm_name}[ ,]"
-
-
-def _alive(address: str, pid: str) -> bool:
-    try:
-        host.run(address, ["kill", "-0", pid])
-    except RuntimeError:
-        return False
-    return True
-
-
-def _wait_dead(address: str, pids: list[str], seconds: int) -> list[str]:
-    deadline = time.monotonic() + seconds
-    alive = list(pids)
-    while alive:
-        alive = [pid for pid in alive if _alive(address, pid)]
-        if not alive or time.monotonic() >= deadline:
-            break
-        time.sleep(1)
-    return alive
+from .errors import NonRetryableError
 
 
 def _stop_vm(address: str, vm_name: str) -> None:
-    # libvirt primero; si no aplica, se sigue con los pids
     libvirt_vm.destroy(address, vm_name)
-    pids = _qemu_pids(address, vm_name)
-    if not pids:
-        return
-    for pid in pids:
-        try:
-            host.run(address, ["kill", "-TERM", pid])
-        except RuntimeError:
-            pass
-    alive = _wait_dead(address, pids, TERM_WAIT_SECONDS)
-    for pid in alive:
-        try:
-            host.run(address, ["kill", "-KILL", pid])
-        except RuntimeError:
-            pass
-    alive = _wait_dead(address, alive, KILL_WAIT_SECONDS)
-    if alive:
-        raise RetryableError("VM_STILL_RUNNING", f"{vm_name} pids {alive}")
 
 
 def destroy_slice_host(request: AdapterActionInput) -> dict:
@@ -105,12 +22,10 @@ def destroy_slice_host(request: AdapterActionInput) -> dict:
         _stop_vm(address, vm_name)
         libvirt_vm.undefine(address, vm_name)
         for path in (
-            _run_path(vm_name),
             str(config.STORAGE_ROOT / "overlay" / f"{vm_id}.qcow2"),
             str(config.STORAGE_ROOT / "seeds" / f"{vm_id}.iso"),
-            # Rutas antiguas de este mismo archivo; rm -f no falla si no existen.
-            str(config.RUN_ROOT / f"{vm_name}.pid"),
-            str(config.STORAGE_ROOT / "overlays" / f"{vm_id}.qcow2"),
+            str(config.STORAGE_ROOT / "seeds" / f"{vm_id}.iso.sha256"),
+            str(config.STORAGE_ROOT / "seeds" / f"{vm_id}.iso.input.sha256"),
         ):
             host.run(address, ["rm", "-f", path])
         destroyed_vms.append(vm_id)

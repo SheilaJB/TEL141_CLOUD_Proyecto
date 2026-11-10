@@ -24,6 +24,7 @@ class ImageResponse(BaseModel):
     nombre: str
     cluster_compatible: Optional[int] = None
     ruta_referencia: str
+    cloud_init: bool
     contador_refs: int
     estado: str
 

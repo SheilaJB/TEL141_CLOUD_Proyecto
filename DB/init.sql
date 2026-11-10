@@ -182,7 +182,7 @@ CREATE TABLE slices.image (
 INSERT INTO slices.image (nombre, cluster_compatible, ruta_referencia, diskmb_size, cloud_init) VALUES
     ('Cirros', 1, 'cirros-0.6.2-x86_64-disk.img', 150, FALSE),
     ('Ubuntu', 1, 'focal-server-cloudimg-amd64.img', 2350, TRUE),
-    ('Ubuntu 24.04', 1, 'ubuntu-24.04-minimal-cloudimg-amd64.img', 2450, TRUE),
+    ('Ubuntu 24.04', 1, 'ubuntu-24.04-minimal-cloudimg-amd64.img', 3600, TRUE),
     ('Ubuntu 20.04', 1, 'focal-server-cloudimg-amd64.img', 2450, TRUE);
 
 CREATE TABLE slices.flavor (

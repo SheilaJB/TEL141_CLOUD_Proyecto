@@ -59,6 +59,9 @@ def create_vm(request: AdapterActionInput) -> dict:
     use_seed = image.get("cloud_init")
     if not isinstance(use_seed, bool):
         raise NonRetryableError("IMAGE_CLOUD_INIT_INVALID")
+    print(f"Creating VM {vm_name} on host {address} with params: {params}")
+    print(f"Image: {image}. Base path: {config.STORAGE_ROOT / 'base' / str(image.get('reference'))}")
+    print(f"Flavor details - RAM: {flavor.get('ram_mb')} MB, vCPUs: {flavor.get('vcpu')}, Disk: {flavor.get('disk_mb')} MB")
     print(f"VM {vm_name}: cloud_init={use_seed}")
     seed = str(config.STORAGE_ROOT / "seeds" / f"{vm_id}.iso") if use_seed else None
 

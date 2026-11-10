@@ -28,6 +28,7 @@ Content-Type: application/json
 
 ### ---------- 1. DEPLOY ----------
 # Crea slice + versión 1 (DRAFT) con 3 VMs
+# falla si Ubuntu 24.04 usa flavor rojo-ex2 (solo large-v1 es suficiente)
 # @name createSlice
 POST {{baseUrl}}/slices
 Authorization: Bearer {{token}}
@@ -41,7 +42,7 @@ Content-Type: application/json
     "vms": [
       { "name": "vm1", "flavor": "verde-ex2", "image": "Ubuntu", "public": true },
       { "name": "vm2", "flavor": "verde-ex2", "image": "Ubuntu", "public": true },
-      { "name": "vm3", "flavor": "rojo-ex2",  "image": "Cirros", "public": false }
+      { "name": "vm3", "flavor": "rojo-ex2",  "image": "Ubuntu 24.04", "public": true }
     ],
     "links": [
       { "name": "l-vm1-vm2", "endpoints": ["vm1", "vm2"] },
@@ -91,7 +92,7 @@ Content-Type: application/json
   "vms": [
     { "name": "vm1", "flavor": "verde-ex2", "image": "Ubuntu", "public": true },
     { "name": "vm2", "flavor": "verde-ex2", "image": "Ubuntu", "public": true },
-    { "name": "vm4", "flavor": "verde-ex2", "image": "Ubuntu", "public": false }
+    { "name": "vm4", "flavor": "large-v1", "image": "Ubuntu 24.04", "public": true }
   ],
   "links": [
     { "name": "l-vm1-vm2", "endpoints": ["vm1", "vm2"] },
@@ -111,7 +112,7 @@ Content-Type: application/json
   "vms": [
     { "name": "vm1", "flavor": "large-v1", "image": "Ubuntu", "public": true },
     { "name": "vm2", "flavor": "verde-ex2", "image": "Ubuntu", "public": true },
-    { "name": "vm4", "flavor": "verde-ex2", "image": "Ubuntu", "public": false }
+    { "name": "vm4", "flavor": "large-v1", "image": "Ubuntu 24.04", "public": true }
   ],
   "links": [
     { "name": "l-vm1-vm2", "endpoints": ["vm1", "vm2"] },

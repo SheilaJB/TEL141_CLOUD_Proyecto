@@ -50,9 +50,18 @@ def render_network_config(
             ]
         )
         if nic.get("publico") is True:
+            lines.append("    mtu: 1400")
             gateway = nic.get("gateway")
             if gateway:
                 lines.extend([f"    gateway4: {_yaml_scalar(gateway)}"])
+            lines.extend(
+                [
+                    "    nameservers:",
+                    "      addresses:",
+                    "        - 8.8.8.8",
+                    "        - 1.1.1.1",
+                ]
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -85,16 +94,25 @@ def render_seed_user_data(hostname: str) -> str:
     return "\n".join(
         [
             "#cloud-config",
-            "packages:",
-            "  - qemu-guest-agent",
             f"hostname: {_yaml_scalar(hostname)}",
             "users:",
             "  - default",
             "ssh_pwauth: true",
             "chpasswd:",
             "  expire: false",
-            "  list: |",
-            "    ubuntu:ubuntu",
+            "  users:",
+            "    - {name: ubuntu, password: ubuntu, type: text}",
+            "bootcmd:",
+            '  - "systemctl mask --now apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service unattended-upgrades.service || true"',
+            '  - "chmod -x /usr/lib/update-notifier/update-motd-updates-available || true"',
+            "apt:",
+            "  conf: |",
+            '    DPkg::Lock::Timeout "120";',
+            "package_update: true",
+            "packages:",
+            "  - qemu-guest-agent",
+            "runcmd:",
+            "  - systemctl start qemu-guest-agent",
             "",
         ]
     )

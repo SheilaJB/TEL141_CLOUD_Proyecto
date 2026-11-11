@@ -1,6 +1,7 @@
 """Safe, synchronous host command transport."""
 
 import subprocess
+import shlex
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -47,7 +48,7 @@ def run(host: str, command: Sequence[str], *, timeout: int | None = None) -> str
     # `host` se ignora: siempre se conecta al gw (config.GATEWAY_IP) por el puerto del servidor
     args = ["ssh", "-p", str(_port_of(host)), *_ssh_options(host)]
     args.append(f"{config.SSH_USER}@{config.GATEWAY_IP}")
-    args.extend(["sudo", *command])
+    args.append(shlex.join(["sudo", *command]))
     try:
         result = subprocess.run(
             args,

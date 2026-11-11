@@ -207,6 +207,10 @@ def _hot_netplan_path(mac: str) -> str:
         raise NonRetryableError("NIC_INCOMPLETE")
     return f"/etc/netplan/90-hot-{normalized}.yaml"
 
+def _hot_netplan(network_config: str) -> str:
+    # Netplan necesita la clave raíz `network:`; network-config de cloud-init no la incluye.
+    body = "\n".join(f"  {line}" if line else line for line in network_config.splitlines())
+    return "network:\n" + body + "\n"
 
 def _guest_read_file(address: str, vm_name: str, path: str) -> str | None:
     script = (
@@ -354,7 +358,7 @@ def attach_port(request: AdapterActionInput) -> dict:
         mac = str(nic.get("mac") or "")
         if cloud_init:
             netplan_path = _hot_netplan_path(mac)
-            netplan_contents = render_network_config([nic])
+            netplan_contents = _hot_netplan(render_network_config([nic]))
         interfaces = libvirt_vm.domain_interfaces(
             libvirt_vm._virsh(ip, "dumpxml", vm_name)
         )

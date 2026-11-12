@@ -20,6 +20,9 @@ QEMU_VNC_BASE_PORT = 5900
 # donde escucha QEMU).
 VNC_FACT_BASE_PORT = 30000
 START_TIMEOUT_S = 10
+# Tras un start (frío o con disco que crece) el balloon debe converger a
+# currentMemory. Si no lo hace en este plazo, la acción se reintenta.
+BALLOON_TIMEOUT_S = 90
 
 
 def _param(request: AdapterActionInput, name: str):
@@ -195,14 +198,91 @@ def _define_existing_xml(address: str, vm_name: str, xml: str) -> None:
         host.run(address, ["rm", "-f", remote])
 
 
+def _live_memory_mib(address: str, vm_name: str) -> int:
+    """RAM real del balloon (dommemstat). No usa dumpxml (puede estar stale)."""
+    out = libvirt_vm._virsh(address, "dommemstat", vm_name)
+    for line in out.splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and fields[0] == "actual":
+            return int(fields[1]) // 1024
+    raise NonRetryableError("DOMMEMSTAT_MISSING", vm_name)
+
+
+def _config_resources(address: str, vm_name: str) -> tuple[int, int]:
+    """vCPU y RAM actual del XML persistente (<currentMemory>, fallback <memory>)."""
+    xml = libvirt_vm._virsh(address, "dumpxml", vm_name, "--inactive")
+    current_cpu, current_memory, _, _ = _domain_resources(xml)
+    return current_cpu, current_memory
+
+
+def _wait_balloon(
+    address: str, vm_name: str, expected_ram_mib: int, timeout_s: int = BALLOON_TIMEOUT_S
+) -> int:
+    """Tras start, el balloon (dommemstat actual) debe converger a after[1] MiB."""
+    deadline = time.monotonic() + timeout_s
+    last = None
+    while time.monotonic() < deadline:
+        try:
+            last = _live_memory_mib(address, vm_name)
+            if last == expected_ram_mib:
+                return expected_ram_mib
+        except (RuntimeError, NonRetryableError, ValueError, IndexError):
+            pass
+        time.sleep(2)
+    raise RetryableError(
+        "RESIZE_NOT_APPLIED",
+        f"{vm_name} balloon={last} expected={expected_ram_mib}",
+    )
+
+
+def _start_and_wait_balloon(address: str, vm_name: str, expected_ram_mib: int) -> None:
+    """Arranca el dominio y espera a que el balloon converja a expected_ram_mib."""
+    try:
+        libvirt_vm._virsh(address, "start", vm_name)
+    except RuntimeError as exc:
+        libvirt_vm._raise_start_error(str(exc))
+    if libvirt_vm._virsh(address, "domstate", vm_name).strip() != "running":
+        raise RetryableError("QEMU_START_FAILED", vm_name)
+    _wait_balloon(address, vm_name, expected_ram_mib, timeout_s=BALLOON_TIMEOUT_S)
+
+
+def _wait_live_resize(
+    address: str, vm_name: str, expected_cpu: int, expected_ram_mib: int, timeout_s: int = 30
+) -> tuple[int, int]:
+    """Ruta en caliente: espera CPU live y balloon; no toca el dominio."""
+    deadline = time.monotonic() + timeout_s
+    last = None
+    while time.monotonic() < deadline:
+        try:
+            xml = libvirt_vm._virsh(address, "dumpxml", vm_name)
+            root = ET.fromstring(xml)
+            cpu_el = root.find("vcpu")
+            if cpu_el is None:
+                raise NonRetryableError("DOMAIN_XML_INVALID")
+            cpu = int(cpu_el.get("current", cpu_el.text or ""))
+            ram = _live_memory_mib(address, vm_name)
+            last = (cpu, ram)
+            if cpu == expected_cpu and ram == expected_ram_mib:
+                return cpu, ram
+        except (RuntimeError, NonRetryableError, ET.ParseError, ValueError):
+            pass
+        time.sleep(2)
+    raise RetryableError(
+        "RESIZE_NOT_APPLIED",
+        f"{vm_name} live={last} expected=({expected_cpu}, {expected_ram_mib})",
+    )
+
+
 def resize_vm(request: AdapterActionInput) -> dict:
     address = host.endpoint(_require_host(request))
     params = request.action.params
-    before = _resize_flavor(params, "before_flavor")
-    after = _resize_flavor(params, "flavor")
-    hot_resize = params.get("hot_resize", False)
+    # P63/P64: la capacidad debe venir explícita. Sin default False: un resize
+    # pensado en caliente nunca se convierte en frío por un parámetro ausente.
+    hot_resize = params.get("hot_resize")
     if not isinstance(hot_resize, bool):
         raise NonRetryableError("VM_PARAMS_INVALID")
+    before = _resize_flavor(params, "before_flavor")
+    after = _resize_flavor(params, "flavor")
     if after[2] < before[2]:
         raise NonRetryableError("DISK_SHRINK")
     if after[0] > config.HEADROOM_VCPU_MAX or after[1] > config.HEADROOM_MEMORY_MAX_MB:
@@ -210,56 +290,109 @@ def resize_vm(request: AdapterActionInput) -> dict:
     vm_id = str(request.action.target.id)
     vm_name = "vm-" + vm_id[:8]
     overlay = str(config.STORAGE_ROOT / "overlay" / f"{vm_id}.qcow2")
+    target_size = after[2] * 1024 * 1024
+    # Tabla: hot_resize=True + disco igual -> "hot"; + disco crece -> "hot_disk";
+    # hot_resize=False -> "cold" (con o sin crecimiento de disco).
+    disk_grows = after[2] > before[2]
+    path = ("hot_disk" if disk_grows else "hot") if hot_resize else "cold"
+    facts = {"state": "RUNNING", "path": path, "vcpu": after[0], "ram_mb": after[1], "disk_mb": after[2]}
     virsh = libvirt_vm._virsh
+
+    # La ruta se decide antes de mirar el estado; domstate es la primera
+    # lectura del host. Después se leen solo datos que no dependen del estado.
     state = virsh(address, "domstate", vm_name).strip()
-    running = state == "running"
-    if state not in {"running", "shut off"}:
-        raise NonRetryableError("VM_STATE_INVALID", state)
     persistent_xml = virsh(address, "dumpxml", vm_name, "--inactive")
     persistent = _domain_resources(persistent_xml)
-    live = _domain_resources(virsh(address, "dumpxml", vm_name)) if running else None
     info = json.loads(host.run(address, ["qemu-img", "info", "--force-share", "--output=json", overlay]))
     virtual_size = int(info["virtual-size"])
-    target_size = after[2] * 1024 * 1024
+    # DISK_SHRINK y DISK_SIZE_MISMATCH no dependen del estado del dominio:
+    # se evalúan siempre con el overlay ya inspeccionado.
     if virtual_size > target_size:
         raise NonRetryableError("DISK_SHRINK")
     if before[2] == after[2] and virtual_size != target_size:
         raise NonRetryableError("DISK_SIZE_MISMATCH")
-    path = "hot" if hot_resize and before[2] == after[2] else "cold"
-    facts = {"state": "RUNNING", "path": path, "vcpu": after[0], "ram_mb": after[1], "disk_mb": after[2]}
-    if running and live is not None and live[:2] == after[:2] and persistent[:2] == after[:2] and virtual_size == target_size:
-        return {**facts, "_already_existed": True}
 
-    if path == "hot":
-        if not running or live is None:
-            raise NonRetryableError("VM_STATE_INVALID", state)
-        if any(resources[2] < after[0] or resources[3] is None or resources[3] < after[1] for resources in (live, persistent)):
-            raise NonRetryableError("HOT_HEADROOM_MISSING")
-        virsh(address, "setvcpus", vm_name, str(after[0]), "--live", "--config")
-        virsh(address, "setmem", vm_name, f"{after[1]}M", "--live", "--config")
+    if state == "running":
+        live = _domain_resources(virsh(address, "dumpxml", vm_name))
+        # "live" incluye el balloon real, no solo el currentMemory de dumpxml.
+        live_ram = _live_memory_mib(address, vm_name)
+        if (
+            live[:2] == after[:2]
+            and live_ram == after[1]
+            and persistent[:2] == after[:2]
+            and virtual_size == target_size
+        ):
+            return {**facts, "_already_existed": True}
+
+        if path in {"hot", "hot_disk"}:
+            # P63: sin headroom se falla; nunca se cae a frío en silencio.
+            if any(
+                resources[2] < after[0] or resources[3] is None or resources[3] < after[1]
+                for resources in (live, persistent)
+            ):
+                raise NonRetryableError("HOT_HEADROOM_MISSING")
+            virsh(address, "setvcpus", vm_name, str(after[0]), "--live", "--config")
+            virsh(address, "setmem", vm_name, f"{after[1]}M", "--live", "--config")
+            if path == "hot":
+                _wait_live_resize(address, vm_name, after[0], after[1], timeout_s=BALLOON_TIMEOUT_S)
+            else:
+                _stop_vm(address, vm_name)
+                if virsh(address, "domstate", vm_name).strip() != "shut off":
+                    raise RetryableError("VM_STILL_RUNNING", vm_name)
+                if virtual_size < target_size:
+                    host.run(address, ["qemu-img", "resize", overlay, f"{after[2]}M"])
+                _start_and_wait_balloon(address, vm_name, after[1])
+        else:
+            _stop_vm(address, vm_name)
+            if virsh(address, "domstate", vm_name).strip() != "shut off":
+                raise RetryableError("VM_STILL_RUNNING", vm_name)
+            if virtual_size < target_size:
+                host.run(address, ["qemu-img", "resize", overlay, f"{after[2]}M"])
+            if persistent[2] < after[0]:
+                virsh(address, "setvcpus", vm_name, str(after[0]), "--maximum", "--config")
+            virsh(address, "setvcpus", vm_name, str(after[0]), "--config")
+            root = ET.fromstring(persistent_xml)
+            maximum_memory = _memory_mib(root.find("memory"))
+            if maximum_memory < after[1]:
+                virsh(address, "setmaxmem", vm_name, f"{after[1]}M", "--config")
+            virsh(address, "setmem", vm_name, f"{after[1]}M", "--config")
+            _define_existing_xml(address, vm_name, virsh(address, "dumpxml", vm_name, "--inactive"))
+            _start_and_wait_balloon(address, vm_name, after[1])
     else:
-        _stop_vm(address, vm_name)
-        if virsh(address, "domstate", vm_name).strip() != "shut off":
-            raise RetryableError("VM_STILL_RUNNING", vm_name)
-        if virtual_size < target_size:
-            host.run(address, ["qemu-img", "resize", overlay, f"{after[2]}M"])
-        if persistent[2] < after[0]:
-            virsh(address, "setvcpus", vm_name, str(after[0]), "--maximum", "--config")
-        virsh(address, "setvcpus", vm_name, str(after[0]), "--config")
-        root = ET.fromstring(persistent_xml)
-        maximum_memory = _memory_mib(root.find("memory"))
-        if maximum_memory < after[1]:
-            virsh(address, "setmaxmem", vm_name, f"{after[1]}M", "--config")
-        virsh(address, "setmem", vm_name, f"{after[1]}M", "--config")
-        _define_existing_xml(address, vm_name, virsh(address, "dumpxml", vm_name, "--inactive"))
-        virsh(address, "start", vm_name)
+        if path == "hot":
+            raise NonRetryableError("VM_STATE_INVALID", state)
+        if state in {"shut off", "paused", "crashed"}:
+            # Firma de intento propio: config y disco ya en el objetivo. Se
+            # comprueba antes de tocar la VM; si no, la apagó otro proceso.
+            if persistent[:2] != after[:2] or virtual_size != target_size:
+                raise NonRetryableError("VM_STATE_INVALID", state)
+            if state != "shut off":
+                _stop_vm(address, vm_name)
+                if virsh(address, "domstate", vm_name).strip() != "shut off":
+                    raise RetryableError("VM_STILL_RUNNING", vm_name)
+            _start_and_wait_balloon(address, vm_name, after[1])
+        else:
+            raise NonRetryableError("VM_STATE_INVALID", state)
+
     if virsh(address, "domstate", vm_name).strip() != "running":
         raise RetryableError("QEMU_START_FAILED", vm_name)
-    final_live = _domain_resources(virsh(address, "dumpxml", vm_name))
-    final_config = _domain_resources(virsh(address, "dumpxml", vm_name, "--inactive"))
-    final_disk = json.loads(host.run(address, ["qemu-img", "info", "--force-share", "--output=json", overlay]))
-    if final_live[:2] != after[:2] or final_config[:2] != after[:2] or int(final_disk["virtual-size"]) != target_size:
-        raise RetryableError("RESIZE_NOT_APPLIED", vm_name)
+    live_cpu = _domain_resources(virsh(address, "dumpxml", vm_name))[0]
+    config_cpu, config_ram = _config_resources(address, vm_name)
+    final_disk = json.loads(
+        host.run(address, ["qemu-img", "info", "--force-share", "--output=json", overlay])
+    )
+    if (
+        live_cpu != after[0]
+        or config_cpu != after[0]
+        or config_ram != after[1]
+        or int(final_disk["virtual-size"]) != target_size
+    ):
+        detail = (
+            f"{vm_name} expected={(after[0], after[1])} live_cpu={live_cpu} "
+            f"config={(config_cpu, config_ram)} disk={final_disk['virtual-size']} "
+            f"expected_disk={target_size}"
+        )
+        raise RetryableError("RESIZE_NOT_APPLIED", detail[:500])
     return facts
 
 

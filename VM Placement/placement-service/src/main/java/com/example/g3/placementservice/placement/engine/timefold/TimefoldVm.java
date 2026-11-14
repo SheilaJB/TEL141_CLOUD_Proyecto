@@ -20,6 +20,11 @@ public class TimefoldVm {
 
     private PlacementWeights weights;
 
+    // Placement estocastico: varianza de la demanda de CPU y RAM (sigma^2)
+    private double cpuVariance;
+
+    private double ramVariance;
+
     @PlanningPin
     private boolean pinned;
 
@@ -40,6 +45,27 @@ public class TimefoldVm {
         this.resources = resources;
         this.weights = weights;
         this.pinned = pinned;
+    }
+
+    public TimefoldVm(
+            UUID nodeId,
+            long sliceId,
+            ResourceVector resources,
+            double cpuVariance,
+            double ramVariance,
+            PlacementWeights weights,
+            boolean pinned) {
+        this(nodeId, sliceId, resources, weights, pinned);
+        this.cpuVariance = cpuVariance;
+        this.ramVariance = ramVariance;
+    }
+
+    public double getCpuVariance() {
+        return cpuVariance;
+    }
+
+    public double getRamVariance() {
+        return ramVariance;
     }
 
     public UUID getNodeId() {

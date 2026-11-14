@@ -71,7 +71,14 @@ public class TimefoldPlacementMapper {
     }
 
     private TimefoldVm toVm(NewVm vm, PlacementProblem problem) {
-        return new TimefoldVm(vm.nodeId(), vm.sliceId(), vm.demand(), problem.weights(), false);
+        return new TimefoldVm(
+                vm.nodeId(),
+                vm.sliceId(),
+                vm.demand(),
+                vm.cpuVariance(),
+                vm.ramVariance(),
+                problem.weights(),
+                false);
     }
 
     private TimefoldVm toVm(ResizedVm vm, PlacementProblem problem, TimefoldWorker worker) {

@@ -4,6 +4,7 @@ import com.example.g3.placementservice.placement.application.PlacementFailureExc
 import com.example.g3.placementservice.placement.domain.ExistingSliceVm;
 import com.example.g3.placementservice.placement.domain.HostCapacity;
 import com.example.g3.placementservice.placement.domain.NewVm;
+import com.example.g3.placementservice.placement.domain.NormalQuantile;
 import com.example.g3.placementservice.placement.domain.PlacementProblem;
 import com.example.g3.placementservice.placement.domain.PlacementWeights;
 import com.example.g3.placementservice.placement.domain.ResizedVm;
@@ -158,6 +159,9 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
     //coeficiente de variacion (sigma = cv * mu) de CPU y RAM
     private final double cvCpu;
     private final double cvRam;
+    // z(1 - epsilon): margen en sigmas para que P(overflow) <= epsilon
+    private final double zCpu;
+    private final double zRam;
 
     public PlacementSnapshotServiceImpl(
             JdbcTemplate jdbcTemplate,
@@ -168,7 +172,9 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
             @Value("${placement.epsilon-desempate:0.001}") BigDecimal tieBreakWeight,
             @Value("${placement.s4-modo:PENALIZE}") String sliceMode,
             @Value("${placement.estocastico.cv-cpu:0.0}") double cvCpu,
-            @Value("${placement.estocastico.cv-ram:0.0}") double cvRam) {
+            @Value("${placement.estocastico.cv-ram:0.0}") double cvRam,
+            @Value("${placement.estocastico.epsilon-cpu:0.05}") double epsilonCpu,
+            @Value("${placement.estocastico.epsilon-ram:0.01}") double epsilonRam) {
         this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
         this.referenceFlavor = Objects.requireNonNull(referenceFlavor, "referenceFlavor");
         this.consolidationThreshold = consolidationThreshold;
@@ -181,6 +187,8 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
         this.sliceReward = "REWARD".equals(sliceMode);
         this.cvCpu = cvCpu;
         this.cvRam = cvRam;
+        this.zCpu = NormalQuantile.zForOverflow(epsilonCpu);
+        this.zRam = NormalQuantile.zForOverflow(epsilonRam);
         validateConfiguration();
     }
 
@@ -323,7 +331,7 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
         }
         PlacementWeights weights = newVms.isEmpty() && growingVms.isEmpty()
                 ? new PlacementWeights(0, 0, 0, 0, sliceReward)
-                : placementWeights(hosts);
+                : placementWeights(hosts).withStochastic(zCpu, zRam);
         if (hosts.isEmpty() && (!newVms.isEmpty() || !growingVms.isEmpty())) {
             throw new PlacementFailureException(
                     "CONFLICT", "no_active_servers", "Availability zone has no ACTIVE servers");

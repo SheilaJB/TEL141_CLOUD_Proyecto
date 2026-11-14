@@ -155,6 +155,10 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
     private final BigDecimal tieBreakWeight;
     private final boolean sliceReward;
 
+    //coeficiente de variacion (sigma = cv * mu) de CPU y RAM
+    private final double cvCpu;
+    private final double cvRam;
+
     public PlacementSnapshotServiceImpl(
             JdbcTemplate jdbcTemplate,
             @Value("${placement.flavor-referencia:small-v1}") String referenceFlavor,
@@ -162,7 +166,9 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
             @Value("${placement.w2:1}") BigDecimal convexWeight,
             @Value("${placement.s4-fraccion-w1:0.1}") BigDecimal sliceWeightFraction,
             @Value("${placement.epsilon-desempate:0.001}") BigDecimal tieBreakWeight,
-            @Value("${placement.s4-modo:PENALIZE}") String sliceMode) {
+            @Value("${placement.s4-modo:PENALIZE}") String sliceMode,
+            @Value("${placement.estocastico.cv-cpu:0.0}") double cvCpu,
+            @Value("${placement.estocastico.cv-ram:0.0}") double cvRam) {
         this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
         this.referenceFlavor = Objects.requireNonNull(referenceFlavor, "referenceFlavor");
         this.consolidationThreshold = consolidationThreshold;
@@ -173,6 +179,8 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
             throw new IllegalArgumentException("placement.s4-modo must be PENALIZE or REWARD");
         }
         this.sliceReward = "REWARD".equals(sliceMode);
+        this.cvCpu = cvCpu;
+        this.cvRam = cvRam;
         validateConfiguration();
     }
 
@@ -284,7 +292,11 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
 
         List<NewVm> newVms = allocations.stream()
                 .map(allocation -> new NewVm(
-                        allocation.nodeId(), deployment.sliceId(), allocation.resources()))
+                        allocation.nodeId(),
+                        deployment.sliceId(),
+                        allocation.resources(),
+                        variance(allocation.resources().vcpu(), cvCpu),
+                        variance(allocation.resources().ramMb(), cvRam)))
                 .toList();
         List<ResizedVm> growingVms = new ArrayList<>();
         for (PlacementSnapshot.Resize resize : resizes) {
@@ -346,6 +358,12 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
                         rs.getLong("vcpu_reserved"),
                         rs.getLong("vram_mb_reserved"),
                         rs.getLong("vdisk_mb_reserved")));
+    }
+
+    // Varianza de la demanda: sigma^2 = (cv * mu)^2 y  (mu = recurso del flavor)
+    private static double variance(long mean, double cv) {
+        double sigma = cv * mean;
+        return sigma * sigma;
     }
 
     private long effective(long physical, BigDecimal ratio) {
@@ -480,6 +498,9 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
         }
         if (tieBreakWeight == null || tieBreakWeight.signum() < 0) {
             throw new IllegalArgumentException("placement.epsilon-desempate cannot be negative");
+        }
+        if (!(cvCpu >= 0) || !(cvRam >= 0) || Double.isInfinite(cvCpu) || Double.isInfinite(cvRam)) {
+            throw new IllegalArgumentException("placement.estocastico.cv-cpu/cv-ram must be finite and >= 0");
         }
     }
 

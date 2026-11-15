@@ -7,6 +7,8 @@ import ai.timefold.solver.core.api.score.stream.ConstraintFactory;
 import ai.timefold.solver.core.api.score.stream.ConstraintProvider;
 import ai.timefold.solver.core.api.score.stream.Joiners;
 import java.math.BigDecimal;
+import java.math.MathContext;
+import java.math.RoundingMode;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -78,16 +80,24 @@ public class TimefoldPlacementConstraintProvider implements ConstraintProvider {
                 .asConstraint("RESIZE_SIN_CAPACIDAD_DISCO");
     }
 
+    /**
+     * CPU estocastica (chance constraint): P(carga > C) <= epsilon.
+     * Por el TCL la carga del host ~ N(sum(mu), sum(sigma^2)), entonces la condicion es
+     * sum(mu) + z * sqrt(sum(sigma^2)) <= C - ocupado.
+     */
     Constraint capacidadCpuExcedida(ConstraintFactory factory) {
         return factory.forEach(TimefoldVm.class)
                 .filter(vm -> vm.getWorker() != null)
                 .groupBy(TimefoldVm::getWorker,
-                        ConstraintCollectors.sumBigDecimal(vm -> BigDecimal.valueOf(vm.getResources().vcpu())))
-                .filter((worker, load) -> worker.getOccupied().vcpu() + load.longValueExact()
-                        > worker.getCapacity().vcpu())
+                        ConstraintCollectors.sumBigDecimal(vm -> BigDecimal.valueOf(vm.getResources().vcpu())),
+                        ConstraintCollectors.sumBigDecimal(vm -> BigDecimal.valueOf(vm.getCpuVariance())))
+                .filter((worker, mean, variance) -> !fitsStochastic(
+                        worker.getCapacity().vcpu() - worker.getOccupied().vcpu(),
+                        mean, variance, worker.getWeights().zCpu()))
                 .penalizeBigDecimal(HardSoftBigDecimalScore.ONE_HARD,
-                        (worker, load) -> BigDecimal.valueOf(
-                                worker.getOccupied().vcpu() + load.longValueExact() - worker.getCapacity().vcpu()))
+                        (worker, mean, variance) -> stochasticExcess(
+                                worker.getCapacity().vcpu() - worker.getOccupied().vcpu(),
+                                mean, variance, worker.getWeights().zCpu()))
                 .asConstraint("CAPACIDAD_EXCEDIDA_NUEVA_CPU");
     }
 
@@ -191,6 +201,27 @@ public class TimefoldPlacementConstraintProvider implements ConstraintProvider {
                 .impactBigDecimal(HardSoftBigDecimalScore.ONE_SOFT,
                         (vm, member) -> sliceImpact(vm))
                 .asConstraint("DISTRIBUCION_SLICE_EXISTENTES");
+    }
+
+    /**
+     * Condicion estocastica sin raiz cuadrada (forma entera de la clase):
+     * con H = libre - sum(mu), cabe si H >= 0 y H^2 >= z^2 * sum(sigma^2).
+     */
+    static boolean fitsStochastic(long free, BigDecimal mean, BigDecimal variance, double z) {
+        BigDecimal headroom = BigDecimal.valueOf(free).subtract(mean);
+        if (headroom.signum() < 0) {
+            return false;
+        }
+        BigDecimal zSquared = BigDecimal.valueOf(z).multiply(BigDecimal.valueOf(z));
+        return headroom.multiply(headroom).compareTo(zSquared.multiply(variance)) >= 0;
+    }
+
+    /** Cuanto se excede: sum(mu) + z * sqrt(sum(sigma^2)) - libre (minimo 1 si no cabe). */
+    static BigDecimal stochasticExcess(long free, BigDecimal mean, BigDecimal variance, double z) {
+        BigDecimal margin = BigDecimal.valueOf(z).multiply(variance.sqrt(MathContext.DECIMAL64));
+        BigDecimal excess = mean.add(margin).subtract(BigDecimal.valueOf(free))
+                .setScale(0, RoundingMode.CEILING);
+        return excess.max(BigDecimal.ONE);
     }
 
     private BigDecimal sliceImpact(TimefoldVm vm) {

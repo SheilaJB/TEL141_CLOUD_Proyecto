@@ -43,29 +43,34 @@ public class TimefoldPlacementConstraintProvider implements ConstraintProvider {
                 .asConstraint("VM_SIN_WORKER");
     }
 
+    /**
+     * Resize de CPU contra el techo (fisico * ratio_limit), igual que el SQL.
+     * El riesgo estocastico del resize ya lo cubre capacidadCpuExcedida (incluye VMs fijadas).
+     */
     Constraint resizeCpuExcedida(ConstraintFactory factory) {
         return factory.forEach(TimefoldVm.class)
                 .filter(vm -> vm.isPinned() && vm.getWorker() != null)
                 .groupBy(TimefoldVm::getWorker,
                         ConstraintCollectors.sumBigDecimal(vm -> BigDecimal.valueOf(vm.getResources().vcpu())))
                 .filter((worker, load) -> worker.getOccupied().vcpu() + load.longValueExact()
-                        > worker.getCapacity().vcpu())
+                        > worker.getCeiling().vcpu())
                 .penalizeBigDecimal(HardSoftBigDecimalScore.ONE_HARD,
                         (worker, load) -> BigDecimal.valueOf(
-                                worker.getOccupied().vcpu() + load.longValueExact() - worker.getCapacity().vcpu()))
+                                worker.getOccupied().vcpu() + load.longValueExact() - worker.getCeiling().vcpu()))
                 .asConstraint("RESIZE_SIN_CAPACIDAD_CPU");
     }
 
+    /** Resize de RAM contra el techo (fisico * ratio_limit). */
     Constraint resizeRamExcedida(ConstraintFactory factory) {
         return factory.forEach(TimefoldVm.class)
                 .filter(vm -> vm.isPinned() && vm.getWorker() != null)
                 .groupBy(TimefoldVm::getWorker,
                         ConstraintCollectors.sumBigDecimal(vm -> BigDecimal.valueOf(vm.getResources().ramMb())))
                 .filter((worker, load) -> worker.getOccupied().ramMb() + load.longValueExact()
-                        > worker.getCapacity().ramMb())
+                        > worker.getCeiling().ramMb())
                 .penalizeBigDecimal(HardSoftBigDecimalScore.ONE_HARD,
                         (worker, load) -> BigDecimal.valueOf(
-                                worker.getOccupied().ramMb() + load.longValueExact() - worker.getCapacity().ramMb()))
+                                worker.getOccupied().ramMb() + load.longValueExact() - worker.getCeiling().ramMb()))
                 .asConstraint("RESIZE_SIN_CAPACIDAD_RAM");
     }
 

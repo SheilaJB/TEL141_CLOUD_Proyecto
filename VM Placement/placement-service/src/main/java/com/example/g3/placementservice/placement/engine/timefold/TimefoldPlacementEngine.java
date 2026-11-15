@@ -61,10 +61,11 @@ public class TimefoldPlacementEngine implements PlacementEngine {
                 .collect(Collectors.toMap(HostCapacity::serverId, Function.identity()));
         for (var vm : problem.growingVms()) {
             HostCapacity host = hosts.get(vm.currentServerId());
+            // CPU/RAM contra el techo (fisico * ratio_limit); el disco tiene ceiling = capacidad
             ResourceVector finalUsage = host.occupied().add(vm.delta());
-            if (finalUsage.vcpu() > host.capacity().vcpu()
-                    || finalUsage.ramMb() > host.capacity().ramMb()
-                    || finalUsage.diskMb() > host.capacity().diskMb()) {
+            if (finalUsage.vcpu() > host.ceiling().vcpu()
+                    || finalUsage.ramMb() > host.ceiling().ramMb()
+                    || finalUsage.diskMb() > host.ceiling().diskMb()) {
                 throw new PlacementFailureException(
                         "CAPACITY_EXCEEDED",
                         "resize_on_fixed_host",

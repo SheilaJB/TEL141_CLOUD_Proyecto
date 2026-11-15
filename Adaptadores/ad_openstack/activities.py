@@ -39,6 +39,7 @@ _ALLOWED_FACTS = {
     "disk_mb",
     "tap_names",
     "destroyed_vms",
+    "destroyed_bridge",  # en OpenStack: redes y proyecto del slice borrados
     # Propios de OpenStack
     "project_id",
     "server_id",

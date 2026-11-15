@@ -162,6 +162,9 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
     // z(1 - epsilon): margen en sigmas para que P(overflow) <= epsilon
     private final double zCpu;
     private final double zRam;
+    // uso medio u: mu = u * flavor
+    private final double uCpu;
+    private final double uRam;
 
     public PlacementSnapshotServiceImpl(
             JdbcTemplate jdbcTemplate,
@@ -174,7 +177,9 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
             @Value("${placement.estocastico.cv-cpu:0.0}") double cvCpu,
             @Value("${placement.estocastico.cv-ram:0.0}") double cvRam,
             @Value("${placement.estocastico.epsilon-cpu:0.05}") double epsilonCpu,
-            @Value("${placement.estocastico.epsilon-ram:0.01}") double epsilonRam) {
+            @Value("${placement.estocastico.epsilon-ram:0.01}") double epsilonRam,
+            @Value("${placement.estocastico.uso-medio-cpu:1.0}") double uCpu,
+            @Value("${placement.estocastico.uso-medio-ram:1.0}") double uRam) {
         this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
         this.referenceFlavor = Objects.requireNonNull(referenceFlavor, "referenceFlavor");
         this.consolidationThreshold = consolidationThreshold;
@@ -189,6 +194,8 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
         this.cvRam = cvRam;
         this.zCpu = NormalQuantile.zForOverflow(epsilonCpu);
         this.zRam = NormalQuantile.zForOverflow(epsilonRam);
+        this.uCpu = uCpu;
+        this.uRam = uRam;
         validateConfiguration();
     }
 
@@ -303,8 +310,8 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
                         allocation.nodeId(),
                         deployment.sliceId(),
                         allocation.resources(),
-                        variance(allocation.resources().vcpu(), cvCpu),
-                        variance(allocation.resources().ramMb(), cvRam)))
+                        variance(allocation.resources().vcpu() * uCpu, cvCpu),
+                        variance(allocation.resources().ramMb() * uRam, cvRam)))
                 .toList();
         List<ResizedVm> growingVms = new ArrayList<>();
         for (PlacementSnapshot.Resize resize : resizes) {
@@ -331,7 +338,7 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
         }
         PlacementWeights weights = newVms.isEmpty() && growingVms.isEmpty()
                 ? new PlacementWeights(0, 0, 0, 0, sliceReward)
-                : placementWeights(hosts).withStochastic(zCpu, zRam);
+                : placementWeights(hosts).withStochastic(zCpu, zRam, uCpu, uRam);
         if (hosts.isEmpty() && (!newVms.isEmpty() || !growingVms.isEmpty())) {
             throw new PlacementFailureException(
                     "CONFLICT", "no_active_servers", "Availability zone has no ACTIVE servers");
@@ -370,8 +377,8 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
                         rs.getLong("vdisk_mb_reserved")));
     }
 
-    // Varianza de la demanda: sigma^2 = (cv * mu)^2 y  (mu = recurso del flavor)
-    private static double variance(long mean, double cv) {
+    // Varianza de la demanda: sigma^2 = (cv * mu)^2 con mu = u * flavor (uso medio)
+    private static double variance(double mean, double cv) {
         double sigma = cv * mean;
         return sigma * sigma;
     }
@@ -511,6 +518,9 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
         }
         if (!(cvCpu >= 0) || !(cvRam >= 0) || Double.isInfinite(cvCpu) || Double.isInfinite(cvRam)) {
             throw new IllegalArgumentException("placement.estocastico.cv-cpu/cv-ram must be finite and >= 0");
+        }
+        if (!(uCpu > 0 && uCpu <= 1) || !(uRam > 0 && uRam <= 1)) {
+            throw new IllegalArgumentException("placement.estocastico.uso-medio-cpu/ram must be in (0, 1]");
         }
     }
 

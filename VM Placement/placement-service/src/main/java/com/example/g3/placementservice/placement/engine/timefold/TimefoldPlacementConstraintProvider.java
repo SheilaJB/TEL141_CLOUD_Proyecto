@@ -91,13 +91,13 @@ public class TimefoldPlacementConstraintProvider implements ConstraintProvider {
                 .groupBy(TimefoldVm::getWorker,
                         ConstraintCollectors.sumBigDecimal(vm -> BigDecimal.valueOf(vm.getResources().vcpu())),
                         ConstraintCollectors.sumBigDecimal(vm -> BigDecimal.valueOf(vm.getCpuVariance())))
-                .filter((worker, mean, variance) -> !fitsStochastic(
-                        worker.getCapacity().vcpu() - worker.getOccupied().vcpu(),
-                        mean, variance, worker.getWeights().zCpu()))
+                .filter((worker, flavor, variance) -> !fitsStochastic(
+                        free(worker.getCapacity().vcpu(), worker.getOccupied().vcpu(), worker.getWeights().uCpu()),
+                        expected(flavor, worker.getWeights().uCpu()), variance, worker.getWeights().zCpu()))
                 .penalizeBigDecimal(HardSoftBigDecimalScore.ONE_HARD,
-                        (worker, mean, variance) -> stochasticExcess(
-                                worker.getCapacity().vcpu() - worker.getOccupied().vcpu(),
-                                mean, variance, worker.getWeights().zCpu()))
+                        (worker, flavor, variance) -> stochasticExcess(
+                                free(worker.getCapacity().vcpu(), worker.getOccupied().vcpu(), worker.getWeights().uCpu()),
+                                expected(flavor, worker.getWeights().uCpu()), variance, worker.getWeights().zCpu()))
                 .asConstraint("CAPACIDAD_EXCEDIDA_NUEVA_CPU");
     }
 
@@ -110,13 +110,13 @@ public class TimefoldPlacementConstraintProvider implements ConstraintProvider {
                 .groupBy(TimefoldVm::getWorker,
                         ConstraintCollectors.sumBigDecimal(vm -> BigDecimal.valueOf(vm.getResources().ramMb())),
                         ConstraintCollectors.sumBigDecimal(vm -> BigDecimal.valueOf(vm.getRamVariance())))
-                .filter((worker, mean, variance) -> !fitsStochastic(
-                        worker.getCapacity().ramMb() - worker.getOccupied().ramMb(),
-                        mean, variance, worker.getWeights().zRam()))
+                .filter((worker, flavor, variance) -> !fitsStochastic(
+                        free(worker.getCapacity().ramMb(), worker.getOccupied().ramMb(), worker.getWeights().uRam()),
+                        expected(flavor, worker.getWeights().uRam()), variance, worker.getWeights().zRam()))
                 .penalizeBigDecimal(HardSoftBigDecimalScore.ONE_HARD,
-                        (worker, mean, variance) -> stochasticExcess(
-                                worker.getCapacity().ramMb() - worker.getOccupied().ramMb(),
-                                mean, variance, worker.getWeights().zRam()))
+                        (worker, flavor, variance) -> stochasticExcess(
+                                free(worker.getCapacity().ramMb(), worker.getOccupied().ramMb(), worker.getWeights().uRam()),
+                                expected(flavor, worker.getWeights().uRam()), variance, worker.getWeights().zRam()))
                 .asConstraint("CAPACIDAD_EXCEDIDA_NUEVA_RAM");
     }
 
@@ -213,8 +213,8 @@ public class TimefoldPlacementConstraintProvider implements ConstraintProvider {
      * Condicion estocastica sin raiz cuadrada:
      * con H = libre - sum(mu), cabe si H >= 0 y H^2 >= z^2 * sum(sigma^2).
      */
-    static boolean fitsStochastic(long free, BigDecimal mean, BigDecimal variance, double z) {
-        BigDecimal headroom = BigDecimal.valueOf(free).subtract(mean);
+    static boolean fitsStochastic(BigDecimal free, BigDecimal mean, BigDecimal variance, double z) {
+        BigDecimal headroom = free.subtract(mean);
         if (headroom.signum() < 0) {
             return false;
         }
@@ -223,11 +223,21 @@ public class TimefoldPlacementConstraintProvider implements ConstraintProvider {
     }
 
     /** sum(mu) + z * sqrt(sum(sigma^2)) - libre */
-    static BigDecimal stochasticExcess(long free, BigDecimal mean, BigDecimal variance, double z) {
+    static BigDecimal stochasticExcess(BigDecimal free, BigDecimal mean, BigDecimal variance, double z) {
         BigDecimal margin = BigDecimal.valueOf(z).multiply(variance.sqrt(MathContext.DECIMAL64));
-        BigDecimal excess = mean.add(margin).subtract(BigDecimal.valueOf(free))
+        BigDecimal excess = mean.add(margin).subtract(free)
                 .setScale(0, RoundingMode.CEILING);
         return excess.max(BigDecimal.ONE);
+    }
+
+    /** Capacidad libre esperada: C - u * ocupado (lo ocupado tambien se usa en promedio u). */
+    static BigDecimal free(long capacity, long occupied, double u) {
+        return BigDecimal.valueOf(capacity).subtract(expected(BigDecimal.valueOf(occupied), u));
+    }
+
+    /** Uso medio esperado: mu = u * flavor. */
+    static BigDecimal expected(BigDecimal flavor, double u) {
+        return flavor.multiply(BigDecimal.valueOf(u));
     }
 
     private BigDecimal sliceImpact(TimefoldVm vm) {

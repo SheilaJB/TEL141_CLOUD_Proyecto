@@ -24,6 +24,8 @@ public class TimefoldPlacementConstraintProvider implements ConstraintProvider {
                 capacidadCpuExcedida(factory),
                 capacidadRamExcedida(factory),
                 capacidadDiscoExcedida(factory),
+                techoCpuExcedido(factory),
+                techoRamExcedido(factory),
                 abrirHostVacio(factory),
                 utilizacionConvexaCpu(factory),
                 utilizacionConvexaRam(factory),
@@ -118,6 +120,36 @@ public class TimefoldPlacementConstraintProvider implements ConstraintProvider {
                                 free(worker.getCapacity().ramMb(), worker.getOccupied().ramMb(), worker.getWeights().uRam()),
                                 expected(flavor, worker.getWeights().uRam()), variance, worker.getWeights().zRam()))
                 .asConstraint("CAPACIDAD_EXCEDIDA_NUEVA_RAM");
+    }
+
+    /**
+     * Techo de sobrecompromiso: lo reservado (flavors) no puede pasar de fisico * ratio_limit.
+     * Es el mismo limite que valida el SQL al reservar, asi el solver no propone algo que la BD rechace.
+     */
+    Constraint techoCpuExcedido(ConstraintFactory factory) {
+        return factory.forEach(TimefoldVm.class)
+                .filter(vm -> vm.getWorker() != null)
+                .groupBy(TimefoldVm::getWorker,
+                        ConstraintCollectors.sumBigDecimal(vm -> BigDecimal.valueOf(vm.getResources().vcpu())))
+                .filter((worker, load) -> worker.getOccupied().vcpu() + load.longValueExact()
+                        > worker.getCeiling().vcpu())
+                .penalizeBigDecimal(HardSoftBigDecimalScore.ONE_HARD,
+                        (worker, load) -> BigDecimal.valueOf(
+                                worker.getOccupied().vcpu() + load.longValueExact() - worker.getCeiling().vcpu()))
+                .asConstraint("TECHO_SOBRECOMPROMISO_CPU");
+    }
+
+    Constraint techoRamExcedido(ConstraintFactory factory) {
+        return factory.forEach(TimefoldVm.class)
+                .filter(vm -> vm.getWorker() != null)
+                .groupBy(TimefoldVm::getWorker,
+                        ConstraintCollectors.sumBigDecimal(vm -> BigDecimal.valueOf(vm.getResources().ramMb())))
+                .filter((worker, load) -> worker.getOccupied().ramMb() + load.longValueExact()
+                        > worker.getCeiling().ramMb())
+                .penalizeBigDecimal(HardSoftBigDecimalScore.ONE_HARD,
+                        (worker, load) -> BigDecimal.valueOf(
+                                worker.getOccupied().ramMb() + load.longValueExact() - worker.getCeiling().ramMb()))
+                .asConstraint("TECHO_SOBRECOMPROMISO_RAM");
     }
 
     Constraint capacidadDiscoExcedida(ConstraintFactory factory) {

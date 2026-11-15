@@ -11,13 +11,20 @@ public class TimefoldWorker {
     private final int serverId;
     private final ResourceVector capacity;
     private final ResourceVector occupied;
+    // Techo absoluto de reservas (fisico * allocation_ratio_limit)
+    private final ResourceVector ceiling;
     private final PlacementWeights weights;
 
     public TimefoldWorker(HostCapacity host, PlacementWeights weights) {
         this.serverId = host.serverId();
         this.capacity = host.capacity();
         this.occupied = host.occupied();
+        this.ceiling = host.ceiling();
         this.weights = weights;
+    }
+
+    public ResourceVector getCeiling() {
+        return ceiling;
     }
 
     public int getServerId() {

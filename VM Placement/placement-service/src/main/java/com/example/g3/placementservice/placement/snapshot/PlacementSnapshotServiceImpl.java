@@ -84,7 +84,8 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
             SELECT sv.id, sv.total_cpu_cores, sv.total_ram_mb, sv.total_disk_mb,
                    sv.vcpu_reserved, sv.vram_mb_reserved, sv.vdisk_mb_reserved,
                    z.cpu_allocation_ratio_default, z.ram_allocation_ratio_default,
-                   z.disk_allocation_ratio_default
+                   z.disk_allocation_ratio_default,
+                   z.cpu_allocation_ratio_limit, z.ram_allocation_ratio_limit
             FROM slices.servidor sv
             JOIN slices.zona_disponibilidad z ON z.id = sv.zona_id
             WHERE sv.zona_id = ? AND sv.estado = 'ACTIVE'
@@ -289,7 +290,8 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
                         host.serverId(),
                         host.capacity(),
                         host.occupied().subtract(failedNodeReservations.getOrDefault(
-                                host.serverId(), new ResourceVector(0, 0, 0)))))
+                                host.serverId(), new ResourceVector(0, 0, 0))),
+                        host.ceiling()))
                 .toList();
         validatePlanNodes(deployment, deploymentId, allocations, resizes, releases);
 
@@ -364,17 +366,23 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
 
     // CPU y RAM usan capacidad fisica: el riesgo de sobrecompromiso lo controla epsilon (estocastico).
     // El disco sigue deterministico con su allocation ratio.
+    // El techo (ceiling) es fisico * allocation_ratio_limit: el mismo limite que valida el SQL al reservar.
     private HostCapacity toHost(java.sql.ResultSet rs, ZoneData zone) throws java.sql.SQLException {
+        long diskCapacity = effective(rs.getInt("total_disk_mb"), zone.diskRatio());
         return new HostCapacity(
                 rs.getInt("id"),
                 new ResourceVector(
                         rs.getInt("total_cpu_cores"),
                         rs.getInt("total_ram_mb"),
-                        effective(rs.getInt("total_disk_mb"), zone.diskRatio())),
+                        diskCapacity),
                 new ResourceVector(
                         rs.getLong("vcpu_reserved"),
                         rs.getLong("vram_mb_reserved"),
-                        rs.getLong("vdisk_mb_reserved")));
+                        rs.getLong("vdisk_mb_reserved")),
+                new ResourceVector(
+                        effective(rs.getInt("total_cpu_cores"), rs.getBigDecimal("cpu_allocation_ratio_limit")),
+                        effective(rs.getInt("total_ram_mb"), rs.getBigDecimal("ram_allocation_ratio_limit")),
+                        diskCapacity));
     }
 
     // Varianza de la demanda: sigma^2 = (cv * mu)^2 con mu = u * flavor (uso medio)

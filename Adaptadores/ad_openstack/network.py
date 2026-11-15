@@ -20,7 +20,7 @@ from . import client, config, resources
 from .errors import NonRetryableError, RetryableError
 
 logger = logging.getLogger(__name__)
-DETACH_TIMEOUT_S = 60
+DETACH_TIMEOUT_S = 40  # ADAPTER_ACTIVITY_TIMEOUT del Slice Manager es 60 s
 
 
 def _param(request: AdapterActionInput, name: str):

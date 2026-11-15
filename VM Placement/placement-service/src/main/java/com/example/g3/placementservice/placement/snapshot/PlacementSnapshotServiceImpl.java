@@ -355,12 +355,14 @@ public class PlacementSnapshotServiceImpl implements PlacementSnapshotService {
                 activeReservations);
     }
 
+    // CPU y RAM usan capacidad fisica: el riesgo de sobrecompromiso lo controla epsilon (estocastico).
+    // El disco sigue deterministico con su allocation ratio.
     private HostCapacity toHost(java.sql.ResultSet rs, ZoneData zone) throws java.sql.SQLException {
         return new HostCapacity(
                 rs.getInt("id"),
                 new ResourceVector(
-                        effective(rs.getInt("total_cpu_cores"), zone.cpuRatio()),
-                        effective(rs.getInt("total_ram_mb"), zone.ramRatio()),
+                        rs.getInt("total_cpu_cores"),
+                        rs.getInt("total_ram_mb"),
                         effective(rs.getInt("total_disk_mb"), zone.diskRatio())),
                 new ResourceVector(
                         rs.getLong("vcpu_reserved"),

@@ -62,8 +62,8 @@ public class ResourceReservationServiceImpl implements ResourceReservationServic
               AND servidor.zona_id = ?
               AND servidor.zona_id = zona.id
               AND servidor.estado = 'ACTIVE'
-              AND servidor.vcpu_reserved + ? <= FLOOR(servidor.total_cpu_cores * zona.cpu_allocation_ratio_default)
-              AND servidor.vram_mb_reserved + ? <= FLOOR(servidor.total_ram_mb * zona.ram_allocation_ratio_default)
+              AND servidor.vcpu_reserved + ? <= FLOOR(servidor.total_cpu_cores * zona.cpu_allocation_ratio_limit)
+              AND servidor.vram_mb_reserved + ? <= FLOOR(servidor.total_ram_mb * zona.ram_allocation_ratio_limit)
               AND servidor.vdisk_mb_reserved + ? <= FLOOR(servidor.total_disk_mb * zona.disk_allocation_ratio_default)
             """;
 

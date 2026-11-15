@@ -101,16 +101,22 @@ public class TimefoldPlacementConstraintProvider implements ConstraintProvider {
                 .asConstraint("CAPACIDAD_EXCEDIDA_NUEVA_CPU");
     }
 
+    /**
+     * RAM estocastica: (misma chance constraint que CPU ) con su propio z.
+     */
     Constraint capacidadRamExcedida(ConstraintFactory factory) {
         return factory.forEach(TimefoldVm.class)
                 .filter(vm -> vm.getWorker() != null)
                 .groupBy(TimefoldVm::getWorker,
-                        ConstraintCollectors.sumBigDecimal(vm -> BigDecimal.valueOf(vm.getResources().ramMb())))
-                .filter((worker, load) -> worker.getOccupied().ramMb() + load.longValueExact()
-                        > worker.getCapacity().ramMb())
+                        ConstraintCollectors.sumBigDecimal(vm -> BigDecimal.valueOf(vm.getResources().ramMb())),
+                        ConstraintCollectors.sumBigDecimal(vm -> BigDecimal.valueOf(vm.getRamVariance())))
+                .filter((worker, mean, variance) -> !fitsStochastic(
+                        worker.getCapacity().ramMb() - worker.getOccupied().ramMb(),
+                        mean, variance, worker.getWeights().zRam()))
                 .penalizeBigDecimal(HardSoftBigDecimalScore.ONE_HARD,
-                        (worker, load) -> BigDecimal.valueOf(
-                                worker.getOccupied().ramMb() + load.longValueExact() - worker.getCapacity().ramMb()))
+                        (worker, mean, variance) -> stochasticExcess(
+                                worker.getCapacity().ramMb() - worker.getOccupied().ramMb(),
+                                mean, variance, worker.getWeights().zRam()))
                 .asConstraint("CAPACIDAD_EXCEDIDA_NUEVA_RAM");
     }
 
@@ -204,7 +210,7 @@ public class TimefoldPlacementConstraintProvider implements ConstraintProvider {
     }
 
     /**
-     * Condicion estocastica sin raiz cuadrada (forma entera de la clase):
+     * Condicion estocastica sin raiz cuadrada:
      * con H = libre - sum(mu), cabe si H >= 0 y H^2 >= z^2 * sum(sigma^2).
      */
     static boolean fitsStochastic(long free, BigDecimal mean, BigDecimal variance, double z) {
@@ -216,7 +222,7 @@ public class TimefoldPlacementConstraintProvider implements ConstraintProvider {
         return headroom.multiply(headroom).compareTo(zSquared.multiply(variance)) >= 0;
     }
 
-    /** Cuanto se excede: sum(mu) + z * sqrt(sum(sigma^2)) - libre (minimo 1 si no cabe). */
+    /** sum(mu) + z * sqrt(sum(sigma^2)) - libre */
     static BigDecimal stochasticExcess(long free, BigDecimal mean, BigDecimal variance, double z) {
         BigDecimal margin = BigDecimal.valueOf(z).multiply(variance.sqrt(MathContext.DECIMAL64));
         BigDecimal excess = mean.add(margin).subtract(BigDecimal.valueOf(free))

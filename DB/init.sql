@@ -163,10 +163,13 @@ INSERT INTO slices.servidor (ip_serv, mac_serv, ssh_port, total_cpu_cores, total
     ('192.168.201.1', 'fa:16:3e:6d:2a:ec', 5811, 4, 3490, 7000, 1),       -- server 1
     ('192.168.201.2', 'fa:16:3e:0c:21:0d', 5812, 4, 3490, 7300, 2),       -- server 2
     ('192.168.201.3', 'fa:16:3e:05:b2:5d', 5813, 4, 3490, 7100, 2),       -- server 3
-    ('192.168.201.4', 'fa:16:3e:71:e4:8e', 5814, 4, 3490, 7100, 2);       -- server 4
-    -- ('192.168.202.2', 'fa:16:3e:ee:0c:46', 5822, 4, 3100X, 6400X, 3),    -- worker 1
-    -- ('192.168.202.3', 'fa:16:3e:24:7d:00', 5823, 4, 3100X, 6400X, 3),     -- worker 2
-    -- ('192.168.202.4', 'fa:16:3e:d3:f3:4d', 5824, 4, 3100X, 6400X, 3);     -- worker 3
+    ('192.168.201.4', 'fa:16:3e:71:e4:8e', 5814, 4, 3490, 7100, 2),       -- server 4
+    -- Workers OpenStack (ids 5-7 = OS_COMPUTE_HOSTS 5:worker1,6:worker2,7:worker3).
+    -- Físico: 4 vCPU, 3935 MB RAM, 9750 MB disco; se deja margen para
+    -- nova-compute y el agente OVS de Neutron.
+    ('192.168.202.2', 'fa:16:3e:ee:0c:46', 5822, 4, 3100, 6400, 3),       -- worker 1
+    ('192.168.202.3', 'fa:16:3e:24:7d:00', 5823, 4, 3100, 6400, 3),       -- worker 2
+    ('192.168.202.4', 'fa:16:3e:d3:f3:4d', 5824, 4, 3100, 6400, 3);       -- worker 3
 
 CREATE TABLE slices.image (
     id                      SERIAL PRIMARY KEY,
@@ -183,7 +186,10 @@ INSERT INTO slices.image (nombre, cluster_compatible, ruta_referencia, diskmb_si
     ('Cirros', 1, 'cirros-0.6.2-x86_64-disk.img', 150, FALSE),
     ('Ubuntu', 1, 'focal-server-cloudimg-amd64.img', 2350, TRUE),
     ('Ubuntu 24.04', 1, 'ubuntu-24.04-minimal-cloudimg-amd64.img', 3600, TRUE),
-    ('Ubuntu 20.04', 1, 'focal-server-cloudimg-amd64.img', 2450, TRUE);
+    ('Ubuntu 20.04', 1, 'focal-server-cloudimg-amd64.img', 2450, TRUE),
+    -- OpenStack: ruta_referencia = nombre exacto de la imagen en Glance
+    ('Cirros OpenStack', 2, 'cirros', 150, FALSE),
+    ('Ubuntu 20.04 OpenStack', 2, 'ubuntu-20.04', 2450, TRUE);
 
 CREATE TABLE slices.flavor (
     id                  SERIAL PRIMARY KEY,

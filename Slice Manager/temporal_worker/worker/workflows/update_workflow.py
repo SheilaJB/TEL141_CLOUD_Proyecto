@@ -24,7 +24,6 @@ from contracts.queues import (
     ACTIVITY_RESERVE_PLACEMENT,
     ACTIVITY_START_DEPLOYMENT,
     COMPUTE_QUEUE,
-    LINUX_QUEUE,
     NETWORK_QUEUE,
     ORCHESTRATOR_QUEUE,
     PLACEMENT_QUEUE,
@@ -50,6 +49,7 @@ from temporal_worker.worker.workflows.common import (
     REGISTRY_RETRY_POLICY,
     DeploymentStepFailed,
     WorkflowHelpers,
+    adapter_queue,
 )
 
 ADAPTER_ACTIVITIES = {
@@ -264,7 +264,8 @@ class UpdateWorkflow(WorkflowHelpers):
                 deployment_id=deployment_id,
                 rounds=context.plan.rounds,
                 dispatch=lambda action: self._dispatch_action(
-                    prepared_actions.get(action.id)
+                    prepared_actions.get(action.id),
+                    adapter_queue(context.cluster_name),
                 ),
                 point_of_no_return=context.plan.point_of_no_return_round,
                 record_facts=True,
@@ -321,6 +322,7 @@ class UpdateWorkflow(WorkflowHelpers):
     async def _dispatch_action(
         self,
         prepared: AdapterActionInput | None,
+        queue_name: str,
     ) -> AdapterActionOutput:
         if prepared is None:
             raise ApplicationError(
@@ -354,7 +356,7 @@ class UpdateWorkflow(WorkflowHelpers):
             activity_name,
             prepared,
             result_type=AdapterActionOutput,
-            task_queue=LINUX_QUEUE,
+            task_queue=queue_name,
             start_to_close_timeout=(
                 LONG_ADAPTER_ACTIVITY_TIMEOUT
                 if action.op in LONG_ACTIONS

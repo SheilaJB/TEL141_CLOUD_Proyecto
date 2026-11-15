@@ -25,7 +25,6 @@ from contracts.queues import (
     ACTIVITY_COMPUTE_ALLOCATE,
     ACTIVITY_ROLLBACK_COMPUTE,
     COMPUTE_QUEUE,
-    LINUX_QUEUE,
     NETWORK_QUEUE,
     ORCHESTRATOR_QUEUE,
     PLACEMENT_QUEUE,
@@ -52,6 +51,7 @@ from temporal_worker.worker.workflows.common import (
     DeploymentStepFailed,
     RoundsProgress,
     WorkflowHelpers,
+    adapter_queue,
 )
 
 ADAPTER_ACTIVITIES = {
@@ -385,7 +385,7 @@ class DeployWorkflow(WorkflowHelpers):
                     type=ErrorCode.CONFLICT.value,
                     non_retryable=True,
                 )
-        queue_name = LINUX_QUEUE
+        queue_name = adapter_queue(context.cluster_name)
         idempotency_suffix = f"compensate:{action.id}" if compensating else action.id
         host = prepared_action.host if prepared_action is not None else None
         hosts = prepared_action.hosts if prepared_action is not None else []

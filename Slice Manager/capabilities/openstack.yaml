@@ -1,0 +1,10 @@
+supports:
+  # --- Deploy ---
+  set_public_access: true        # puertos en la red flat `external`
+  apply_security_rules: false    # [OPEN] R5 (puertos sin port-security)
+
+  # --- Update (P45) ---
+  hot_resize: false              # Nova solo redimensiona en frío (resize + confirm)
+  stop_start: false
+  hot_attach_port: true          # os-interface de Nova
+  hot_detach_port: true

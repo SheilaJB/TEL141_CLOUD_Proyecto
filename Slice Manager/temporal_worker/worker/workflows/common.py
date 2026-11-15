@@ -10,6 +10,7 @@ from contracts.plan import Action
 from contracts.queues import (
     ACTIVITY_FINISH_DEPLOYMENT,
     ACTIVITY_RECORD_ROUND_FACTS,
+    ADAPTER_QUEUE_BY_CLUSTER,
     ORCHESTRATOR_QUEUE,
 )
 from contracts.registry import (
@@ -81,6 +82,20 @@ class DeploymentStepFailed(Exception):
         self.error = error
         self.compensable = compensable
         super().__init__(error.message)
+
+
+def adapter_queue(cluster_name: str) -> str:
+    """Cola del adaptador del cluster del slice (linux-queue / openstack-queue)."""
+    queue = ADAPTER_QUEUE_BY_CLUSTER.get(cluster_name.strip().lower())
+    if queue is None:
+        # ApplicationError (no ValueError): un error normal dejaría la tarea
+        # del workflow reintentándose para siempre.
+        raise ApplicationError(
+            f"No adapter task queue for cluster {cluster_name!r}",
+            type=ErrorCode.CONFLICT.value,
+            non_retryable=True,
+        )
+    return queue
 
 
 @dataclass

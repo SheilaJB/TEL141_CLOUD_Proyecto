@@ -241,6 +241,40 @@ services:
       - ${ADAPTER_KEYS_DIR:-./Adaptadores/keys}:/run/adapter-keys:ro
     networks: [backend, adapter]
 
+  # Worker Temporal del adaptador OpenStack: APIs del headnode vía túnel SSH por el gateway
+  openstack-adapter-worker:
+    build:
+      context: .
+      dockerfile: Adaptadores/Dockerfile.openstack
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_healthy
+      temporal-create-namespace:
+        condition: service_completed_successfully
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${ORCHESTRATOR_TEMPORAL_NAMESPACE:-default}
+      OPENSTACK_ADAPTER_TEMPORAL_TASK_QUEUE: ${OPENSTACK_ADAPTER_TEMPORAL_TASK_QUEUE:-openstack-queue}
+      ADAPTER_SSH_USER: ubuntu
+      ADAPTER_SSH_KEY: /run/adapter-keys/id_rsa
+      ADAPTER_KNOWN_HOSTS: /run/adapter-keys/known_hosts
+      ADAPTER_SSH_TIMEOUT: 30
+      ADAPTER_GATEWAY_IP: ${ADAPTER_GATEWAY_IP:-10.20.11.250}
+      OS_HEADNODE_SSH_PORT: ${OS_HEADNODE_SSH_PORT:-5821}
+      OS_DOMAIN_ID: ${OS_DOMAIN_ID:-}
+      OS_ADMIN_PROJECT_ID: ${OS_ADMIN_PROJECT_ID:-}
+      OS_ADMIN_USER_ID: ${OS_ADMIN_USER_ID:-}
+      OS_ADMIN_USER_PASSWORD: ${OS_ADMIN_USER_PASSWORD:-}
+      OS_ADMIN_ROLE_ID: ${OS_ADMIN_ROLE_ID:-}
+      OS_COMPUTE_HOSTS: ${OS_COMPUTE_HOSTS:-}
+      OS_EXTERNAL_NETWORK: ${OS_EXTERNAL_NETWORK:-external}
+      OS_FLAT_PHYSNET: ${OS_FLAT_PHYSNET:-physnet1}
+      OS_VLAN_PHYSNET: ${OS_VLAN_PHYSNET:-physnet2}
+    volumes:
+      - ${ADAPTER_KEYS_DIR:-./Adaptadores/keys}:/run/adapter-keys:ro
+    networks: [backend, adapter]
+
   # Microservicio AuthAuthz (Stateful, emite RS256, rota refresh en Postgres)
   auth:
     build:

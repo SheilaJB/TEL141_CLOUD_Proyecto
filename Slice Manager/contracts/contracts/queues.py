@@ -5,6 +5,12 @@ LINUX_QUEUE = "linux-queue"
 OPENSTACK_QUEUE = "openstack-queue"
 PLACEMENT_QUEUE = "placement-queue"
 
+# Cola del adaptador según slices.cluster.nombre (DeploymentContext.cluster_name).
+ADAPTER_QUEUE_BY_CLUSTER = {
+    "linux": LINUX_QUEUE,
+    "openstack": OPENSTACK_QUEUE,
+}
+
 ACTIVITY_GET_PLAN = "get_plan"
 ACTIVITY_GET_APPROVAL_STATE = "get_approval_state"
 ACTIVITY_START_DEPLOYMENT = "start_deployment"

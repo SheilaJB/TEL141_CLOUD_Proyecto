@@ -14,7 +14,6 @@ from contracts.queues import (
     ACTIVITY_GET_PLAN,
     ACTIVITY_GET_SERVER_DIRECTORY,
     ACTIVITY_START_DEPLOYMENT,
-    LINUX_QUEUE,
     ORCHESTRATOR_QUEUE,
     PLACEMENT_QUEUE,
 )
@@ -34,6 +33,7 @@ from temporal_worker.worker.workflows.common import (
     PLACEMENT_RETRY_POLICY,
     DeploymentStepFailed,
     WorkflowHelpers,
+    adapter_queue,
 )
 
 DESTROY_HOST_ACTIVITY = "destroy_slice_host"
@@ -154,7 +154,7 @@ class DestroyWorkflow(WorkflowHelpers):
                     DESTROY_HOST_ACTIVITY,
                     request,
                     result_type=AdapterActionOutput,
-                    task_queue=LINUX_QUEUE,
+                    task_queue=adapter_queue(context.cluster_name),
                     start_to_close_timeout=LONG_ADAPTER_ACTIVITY_TIMEOUT,
                     retry_policy=DESTROY_RETRY_POLICY,
                 )

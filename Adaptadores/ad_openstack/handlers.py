@@ -2,22 +2,19 @@
 
 Each handler receives a complete AdapterActionInput and returns a dict of
 facts (plus the optional `_already_existed` / `_already_absent` markers),
-exactly like the Linux adapter. They are implemented in later commits.
+exactly like the Linux adapter.
 """
 
 from contracts.adapter import AdapterActionInput
 
 from .errors import NonRetryableError
+from .network import attach_port, create_link, delete_link, detach_port
 
 
 def _not_implemented(request: AdapterActionInput) -> dict:
     raise NonRetryableError("NOT_IMPLEMENTED", f"{request.action.op} is not implemented yet")
 
 
-create_link = _not_implemented
-delete_link = _not_implemented
-attach_port = _not_implemented
-detach_port = _not_implemented
 create_vm = _not_implemented
 delete_vm = _not_implemented
 resize_vm = _not_implemented

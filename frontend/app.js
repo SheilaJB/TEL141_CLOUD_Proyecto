@@ -323,8 +323,16 @@ async function viewSlices(main) {
     bindSliceLinks(main);
 }
 
+function liveNodes(topo) {
+    return (topo.nodos || []).filter(n => n.estado_nodo !== "DELETED");
+}
+
+function ip(value) {
+    return value ? String(value).replace(/\/32$/, "") : value;
+}
+
 function topologySvg(topo) {
-    const nodes = topo.nodos || [];
+    const nodes = liveNodes(topo);
     const specLinks = (topo.spec && topo.spec.links) || [];
     const links = specLinks.length
         ? specLinks.map(l => l.endpoints)
@@ -347,7 +355,7 @@ function topologySvg(topo) {
             <circle cx="${x}" cy="${y}" r="24" fill="#161b22" stroke="${color(n.estado_nodo)}" stroke-width="3"/>
             ${publics.has(n.name) ? `<circle cx="${x + 18}" cy="${y - 18}" r="6" fill="#a371f7"><title>Pública</title></circle>` : ""}
             <text x="${x}" y="${y + 4}" text-anchor="middle">${esc(n.name)}</text>
-            <text class="sub" x="${x}" y="${y + 40}" text-anchor="middle">${esc(n.servidor_ip || n.imagen_nombre || "")}</text>
+            <text class="sub" x="${x}" y="${y + 40}" text-anchor="middle">${esc(ip(n.servidor_ip) || n.imagen_nombre || "")}</text>
         </g>`;
     }).join("");
     return `<svg class="topology" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">${lines}${circles}</svg>`;
@@ -362,7 +370,7 @@ async function viewSlice(main, sliceId) {
         const isDraft = summary.estado === "DRAFT" && !summary.version_activa_numero;
         const canUpdate = owner && summary.estado === "RUNNING" && summary.version_activa_numero;
         const canDestroy = owner && ["DRAFT", "RUNNING", "STOPPED", "FAILED"].includes(summary.estado);
-        const nodes = topo.nodos || [];
+        const nodes = liveNodes(topo);
         const links = topo.enlaces || [];
         const out = first ? "" : ($("#slice-out") ? $("#slice-out").innerHTML : "");
         main.innerHTML = `
@@ -403,12 +411,12 @@ async function viewSlice(main, sliceId) {
             </tr></thead><tbody>${nodes.map(n => `<tr>
                 <td><strong>${esc(n.name)}</strong></td><td>${badge(n.estado_nodo)}</td><td>${esc(n.flavor_name || "—")}</td>
                 <td>${n.vcpu ?? "?"} vCPU · ${fmtMb(n.vram_mb)} · ${fmtMb(n.vdisk_mb)}</td>
-                <td>${esc(n.imagen_nombre || "—")}</td><td>${esc(n.servidor_ip || n.servidor_id || "—")}</td><td>${esc(n.puerto_vnc ?? "—")}</td>
+                <td>${esc(n.imagen_nombre || "—")}</td><td>${esc(ip(n.servidor_ip) || n.servidor_id || "—")}</td><td>${esc(n.puerto_vnc ?? "—")}</td>
             </tr>`).join("")}</tbody></table></div>` : specVmsTable(topo.spec)}</div>
             <div class="card"><h3>Enlaces</h3>${links.length ? `<div class="table-wrap"><table><thead><tr>
                 <th>Enlace</th><th>Puertos</th>
             </tr></thead><tbody>${links.map(l => `<tr><td><strong>${esc(l.name)}</strong></td><td>${(l.puertos || []).map(p =>
-                `<div>${esc(p.nodo_name || p.nodo_id)} ${p.public ? badge("PUBLIC") : ""} <span class="muted">${esc(p.ip || "")} ${esc(p.mac || "")} ${p.vlan_tag != null ? `VLAN ${esc(p.vlan_tag)}` : ""}</span></div>`).join("")}</td></tr>`).join("")}
+                `<div>${esc(p.nodo_name || p.nodo_id)} ${p.public ? badge("PUBLIC") : ""} <span class="muted">${esc(ip(p.ip) || "")} ${esc(p.mac || "")} ${p.vlan_tag != null ? `VLAN ${esc(p.vlan_tag)}` : ""}</span></div>`).join("")}</td></tr>`).join("")}
             </tbody></table></div>` : specLinksTable(topo.spec)}</div>
             <div class="card ${out ? "" : "hidden"}" id="slice-out-card"><div class="card-head"><h3>Resultado</h3><button class="btn small" id="close-out">Cerrar</button></div><div id="slice-out">${out}</div></div>`;
         $("#back").onclick = () => go("slices");

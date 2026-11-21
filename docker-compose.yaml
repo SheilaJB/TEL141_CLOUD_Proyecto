@@ -269,8 +269,8 @@ services:
       OS_ADMIN_ROLE_ID: ${OS_ADMIN_ROLE_ID:-}
       OS_COMPUTE_HOSTS: ${OS_COMPUTE_HOSTS:-}
       OS_EXTERNAL_NETWORK: ${OS_EXTERNAL_NETWORK:-external}
-      OS_FLAT_PHYSNET: ${OS_FLAT_PHYSNET:-physnet1}
-      OS_VLAN_PHYSNET: ${OS_VLAN_PHYSNET:-physnet2}
+      OS_FLAT_PHYSNET: ${OS_FLAT_PHYSNET:-physnet0}
+      OS_VLAN_PHYSNET: ${OS_VLAN_PHYSNET:-physnet1}
     volumes:
       - ${ADAPTER_KEYS_DIR:-./Adaptadores/keys}:/run/adapter-keys:ro
     networks: [backend, adapter]

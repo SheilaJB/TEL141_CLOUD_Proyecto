@@ -2,7 +2,7 @@
 
 Modelo (equivalente al de Linux):
   - Enlace privado -> red Neutron link-<link_id> en el proyecto del slice.
-    Tipo VLAN de tenant: Neutron asigna el VLAN del rango de physnet2. No se
+    Tipo VLAN de tenant: Neutron asigna el VLAN del rango de physnet1. No se
     usa el vlan_ctag del Network Manager porque es único solo dentro del
     slice (en Linux lo aísla el S-tag); en OpenStack chocaría entre slices.
     Subred con el CIDR asignado, sin DHCP ni gateway (como en los labs).

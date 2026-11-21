@@ -223,7 +223,7 @@ class QueryRepository:
         where_clause = " AND ".join(conditions)
         query = f"""
             SELECT s.id, s.nombre, s.estado, s.zona_id, z.nombre AS zona_nombre,
-                   s.vlan_s, s.version_activa_id, sv.numero_version AS version_activa_numero,
+                   s.vlan_stag AS vlan_s, s.version_activa_id, sv.numero_version AS version_activa_numero,
                    s.usuario_id, s.fecha_creacion, s.fecha_modificacion
             FROM slices.slice s
             LEFT JOIN slices.zona_disponibilidad z ON s.zona_id = z.id
@@ -249,7 +249,7 @@ class QueryRepository:
 
         query = f"""
             SELECT s.id, s.nombre, s.estado, s.zona_id, z.nombre AS zona_nombre,
-                   s.vlan_s, s.version_activa_id, sv.numero_version AS version_activa_numero,
+                   s.vlan_stag AS vlan_s, s.version_activa_id, sv.numero_version AS version_activa_numero,
                    s.usuario_id, s.fecha_creacion, s.fecha_modificacion
             FROM slices.slice s
             LEFT JOIN slices.zona_disponibilidad z ON s.zona_id = z.id
@@ -294,7 +294,7 @@ class QueryRepository:
                 SELECT sn.id::text, sn.name, sn.flavor_id, f.name AS flavor_name,
                        f.vcpu, f.vram_mb, f.vdisk_mb,
                        sn.imagen_id, img.nombre AS imagen_nombre,
-                       sn.estado_nodo, sn.pid, sn.puerto_vnc,
+                       sn.estado_nodo, sn.pid, sn.vnc_display AS puerto_vnc,
                        rn.servidor_id, srv.ip_serv::text AS servidor_ip
                 FROM slices.slice_nodo sn
                 JOIN slices.flavor f ON sn.flavor_id = f.id
@@ -324,15 +324,16 @@ class QueryRepository:
 
             port_rows = await self.pool.fetch(
                 """
-                SELECT sep.id::text, sep.enlace_id::text, sep.name,
+                SELECT sep.id::text, sep.enlace_id::text,
+                       ('eth' || sep.nic_index) AS name,
                        sep.nodo_id::text, sn.name AS nodo_name,
                        sep.public, sep.mac::text, sep.ip::text,
-                       sep.vlan_tag, sep.ns
+                       se.vlan_ctag AS vlan_tag, NULL::text AS ns
                 FROM slices.slice_enlace_puerto sep
                 JOIN slices.slice_enlace se ON sep.enlace_id = se.id
                 JOIN slices.slice_nodo sn ON sep.nodo_id = sn.id
                 WHERE se.defin_version_id = $1
-                ORDER BY sep.name ASC
+                ORDER BY sep.nic_index NULLS LAST, sep.id
                 """,
                 version_id,
             )

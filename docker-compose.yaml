@@ -339,6 +339,18 @@ services:
       - ${EDGE_KEYS_DIR:-./AuthAuthz/keys}:/run/edge-keys:ro
     networks: [backend, public]
 
+  frontend:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - api-gateway
+    ports:
+      - "${FRONTEND_PORT:-8081}:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks: [public]
+
 networks:
   backend:
     driver: bridge

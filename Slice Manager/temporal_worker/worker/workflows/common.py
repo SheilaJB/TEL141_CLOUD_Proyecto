@@ -85,11 +85,9 @@ class DeploymentStepFailed(Exception):
 
 
 def adapter_queue(cluster_name: str) -> str:
-    """Cola del adaptador del cluster del slice (linux-queue / openstack-queue)."""
     queue = ADAPTER_QUEUE_BY_CLUSTER.get(cluster_name.strip().lower())
     if queue is None:
-        # ApplicationError (no ValueError): un error normal dejaría la tarea
-        # del workflow reintentándose para siempre.
+        # ApplicationError (no ValueError)
         raise ApplicationError(
             f"No adapter task queue for cluster {cluster_name!r}",
             type=ErrorCode.CONFLICT.value,
